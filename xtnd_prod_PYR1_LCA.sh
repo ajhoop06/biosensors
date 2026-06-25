@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#SBATCH --job-name=020xt_b
-#SBATCH --output=output_xtnd_prod_md_b_%j.out                  # Output file
-#SBATCH --error=error_xtnd_prod_md_b_%j.err                    # Error file
+#SBATCH --job-name=032xt_nb
+#SBATCH --output=out_xt_nb_%j.out                  # Output file
+#SBATCH --error=err_xt_nb_%j.err                    # Error file
 #SBATCH --account=ucb351_asc4
 #SBATCH --partition=amilan
-#SBATCH --time=24:00:00
+#SBATCH --time=03:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=64
 #SBATCH --cpus-per-task=1
@@ -13,6 +13,9 @@
 #SBATCH --qos=normal
 #SBATCH --mail-user=ivana.tang@colorado.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
+
+# Usage:
+#   sbatch xtnd_prod_PYR1_LCA.sh <ID> <SEQ_TYPE> <PREFIX> 
 
 export TMPDIR=$SLURM_SCRATCH
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
