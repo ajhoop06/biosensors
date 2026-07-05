@@ -13,13 +13,15 @@
 #SBATCH --mail-user=ivana.tang@colorado.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
 
-# Usage: sbatch post_processing_pipeline_worker.sh <WORKDIR> [CONFIG] [END_TIME_PS]
+# Usage: sbatch post_processing_pipeline_worker.sh <WORKDIR> [CONFIG] [END_TIME_PS] [PHASE]
 #   WORKDIR     full path to the run subdirectory (prod_md_0p9_cutoff_3dt_64x1_16PME_642dd)
 #   CONFIG      path to config.yaml (default: same directory as this script)
 #   END_TIME_PS end of the analysis window in ps (default: equil_end_ps from config, 500000)
 #               e.g. 250000 to analyse only the first 250 ns of production
+#   PHASE       which phase(s) to run: 1, 2, 3, or all (default: all)
+#               Phase 2 and 3 require Phase 1 outputs to already exist.
+#               Phase 3 requires Phase 2 outputs to already exist.
 #
-# Phase 1 (Steps  1-5) always processes the full trajectory for QC/preprocessing.
 # Phases 2-3 honour END_TIME_PS: the medoid is found within that window and all
 # RMSD/RMSF/distance outputs are written to WORKDIR/<END_NS>ns/.
 # Re-running with a different END_TIME_PS produces a separate output directory
@@ -27,7 +29,7 @@
 #
 #   Phase 1 (Steps  1-5):  PBC correction, fitting, C-alpha RMSD, trajectory trim
 #   Phase 2 (Step   6):    Find structural medoid of the production ensemble
-#   Phase 3 (Steps 7-20):  Medoid-referenced RMSD, RMSF, gate-latch distance
+#   Phase 3 (Steps 7-21):  Medoid-referenced RMSD, RMSF, gate-latch distance
 #
 # NOTE: Step 19 (RMSF for gate/latch/Lb7a5/recoil loop subgroups) requires
 #       groups 30-33 to be present in index.ndx. Run run_gate_latch.sh first
@@ -36,14 +38,20 @@
 set -euo pipefail
 
 WORKDIR="${1:?ERROR: WORKDIR argument required}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# SLURM copies the script to a spool dir, so BASH_SOURCE[0] is not the repo.
+# Use SLURM_SUBMIT_DIR when available (sbatch), fall back to BASH_SOURCE (local).
+SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 export CONFIG="${2:-${SCRIPT_DIR}/config.yaml}"
+PHASE="${4:-all}"
 
 if [[ ! -f "$CONFIG" ]]; then
     echo "ERROR: config.yaml not found: $CONFIG" >&2; exit 1
 fi
 if [[ ! -d "$WORKDIR" ]]; then
     echo "ERROR: WORKDIR not found: $WORKDIR" >&2; exit 1
+fi
+if [[ "$PHASE" != "all" && "$PHASE" != "1" && "$PHASE" != "2" && "$PHASE" != "3" ]]; then
+    echo "ERROR: PHASE must be 1, 2, 3, or all (got: '$PHASE')" >&2; exit 1
 fi
 
 FIND_MEDOID="${SCRIPT_DIR}/get_medoid.py"
@@ -118,6 +126,7 @@ echo "════════════════════════�
 # PHASE 1: PBC correction, rotational/translational fitting, and trajectory trim
 # These outputs are shared across all analysis windows and stay in WORKDIR.
 # ──────────────────────────────────────────────────────────────────────────────
+if [[ "$PHASE" == "all" || "$PHASE" == "1" ]]; then
 
 # Step 1: Generate atom index groups
 # Create named atom groups needed throughout the pipeline: ligand and protein
@@ -189,9 +198,12 @@ else
     echo "[5/21] SKIP trim ($TRIM_XTC exists)"
 fi
 
+fi # end PHASE 1
+
 # ──────────────────────────────────────────────────────────────────────────────
 # PHASE 2: Identify the structural medoid of the production ensemble
 # ──────────────────────────────────────────────────────────────────────────────
+if [[ "$PHASE" == "all" || "$PHASE" == "2" || "$PHASE" == "3" ]]; then
 
 # Step 6: Find the structural medoid frame
 # Identify the single trajectory frame that minimizes the sum of squared
@@ -210,15 +222,24 @@ else
     echo "[6/21] SKIP get_medoid ($MEDOID_TXT exists)"
 fi
 
-DUMP_TIME=$(grep '^medoid_time_ps:' "$MEDOID_TXT" | awk '{print $2}')
-if [[ -z "$DUMP_TIME" ]]; then
-    echo "ERROR: could not parse medoid_time_ps from $MEDOID_TXT" >&2; exit 1
+fi # end PHASE 2
+
+# Read medoid time — required for Phase 3 regardless of whether Phase 2 just ran
+if [[ "$PHASE" == "all" || "$PHASE" == "2" || "$PHASE" == "3" ]]; then
+    if [[ ! -f "$MEDOID_TXT" ]]; then
+        echo "ERROR: $MEDOID_TXT not found — run Phase 2 first" >&2; exit 1
+    fi
+    DUMP_TIME=$(grep '^medoid_time_ps:' "$MEDOID_TXT" | awk '{print $2}')
+    if [[ -z "$DUMP_TIME" ]]; then
+        echo "ERROR: could not parse medoid_time_ps from $MEDOID_TXT" >&2; exit 1
+    fi
+    echo "  Medoid time: ${DUMP_TIME} ps"
 fi
-echo "  Medoid time: ${DUMP_TIME} ps"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PHASE 3: Medoid-referenced structural analysis  →  all outputs in $OUT_DIR
 # ──────────────────────────────────────────────────────────────────────────────
+if [[ "$PHASE" == "all" || "$PHASE" == "3" ]]; then
 
 # Step 7: Extract medoid frame — Protein+Ligand
 # Dump only protein and ligand atoms at the medoid time point; used as the
@@ -509,15 +530,20 @@ fi
 echo "[21/21] Removing GROMACS backup files (#*#)"
 rm -f \#*\# "${OUT_DIR}"/\#*\#
 
+fi # end PHASE 3
+
 echo ""
 echo "════════════════════════════════════════════════════════════════"
-echo "  Pipeline complete: $(basename "$(dirname "$WORKDIR")")/$(basename "$WORKDIR")"
+echo "  Pipeline complete (phase: $PHASE): $(basename "$(dirname "$WORKDIR")")/$(basename "$WORKDIR")"
 echo "  End time: $(date)"
+if [[ "$PHASE" == "all" || "$PHASE" == "1" ]]; then
 echo ""
 echo "  Phase 1 outputs (WORKDIR):"
 echo "    $NDX  (groups 20–24)"
 echo "    $RMSD"
 echo "    $TRIM_XTC"
+fi
+if [[ "$PHASE" == "all" || "$PHASE" == "2" || "$PHASE" == "3" ]]; then
 echo ""
 echo "  Phase 2-3 outputs ($OUT_DIR/):"
 echo "    $MEDOID_TXT_FNAME"
@@ -530,4 +556,5 @@ echo "    gate_latch.ndx, gate_latch_timeseries.xvg"
 echo "    rmsf_PL.xvg  (+ loop subgroup files if groups 30–33 present)"
 echo "    Rg_pocket.xvg, sasa_pocket.xvg, pocket_res.ndx"
 echo "    Rg_PL.xvg, sasa_PL.xvg"
+fi
 echo "════════════════════════════════════════════════════════════════"
