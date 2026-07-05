@@ -1,16 +1,16 @@
 #!/bin/bash
 
-#SBATCH --job-name=076xt_b
+#SBATCH --job-name=080xt_nb
 #SBATCH --output=out_xt_nb_%j.out                  # Output file
 #SBATCH --error=err_xt_nb_%j.err                    # Error file
 #SBATCH --account=ucb351_asc4
-#SBATCH --partition=amilan
-#SBATCH --time=24:00:00
+#SBATCH --partition=acpu
+#SBATCH --time=02:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=64
 #SBATCH --cpus-per-task=1
 #SBATCH --constraint=ib
-#SBATCH --qos=normal
+#SBATCH --qos=cpu-normal
 #SBATCH --mail-user=ivana.tang@colorado.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
 

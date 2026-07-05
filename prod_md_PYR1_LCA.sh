@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=1654nb_prod
+#SBATCH --job-name=076b_prod
 #SBATCH --output=output_%j.out                  # Output file
 #SBATCH --error=error_%j.err                    # Error file
 #SBATCH --account=ucb351_asc4
