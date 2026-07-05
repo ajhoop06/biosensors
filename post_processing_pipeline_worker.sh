@@ -31,9 +31,8 @@
 #   Phase 2 (Step   6):    Find structural medoid of the production ensemble
 #   Phase 3 (Steps 7-21):  Medoid-referenced RMSD, RMSF, gate-latch distance
 #
-# NOTE: Step 19 (RMSF for gate/latch/Lb7a5/recoil loop subgroups) requires
-#       groups 30-33 to be present in index.ndx. Run run_gate_latch.sh first
-#       to define these groups; the step is skipped with a warning if absent.
+# NOTE: Step 1 creates loop subgroups 25-28 (ca_gate, ca_latch, ca_Lb7a5,
+#       ca_recoil) in index.ndx. Step 19 uses these for per-loop RMSF.
 
 set -euo pipefail
 
@@ -130,8 +129,9 @@ if [[ "$PHASE" == "all" || "$PHASE" == "1" ]]; then
 
 # Step 1: Generate atom index groups
 # Create named atom groups needed throughout the pipeline: ligand and protein
-# heavy atoms, the combined Protein+LIG group used for centering/fitting, and
-# the gate-loop CA selection used for hinge RMSF calculations.
+# heavy atoms, the combined Protein+LIG group used for centering/fitting,
+# the gate-loop CA selection used for hinge RMSF, and loop subgroups 25-28
+# (ca_gate 84-90, ca_latch 114-118, ca_Lb7a5 148-155, ca_recoil 154-166).
 if [[ ! -f "$NDX" ]]; then
     echo "[1/21] make_ndx → $NDX"
     "$GMX" make_ndx -f "$TPR" -o "$NDX" << EOF
@@ -145,6 +145,14 @@ name 22 Protein_SC_heavy
 name 23 Protein_LIG
 ri ${HINGE} & a CA
 name 24 CA_hinge
+ri 84-90 & a CA
+name 25 ca_gate
+ri 114-118 & a CA
+name 26 ca_latch
+ri 148-155 & a CA
+name 27 ca_Lb7a5
+ri 154-166 & a CA
+name 28 ca_recoil
 q
 EOF
 else
@@ -353,8 +361,8 @@ PYEOF
 # relative to the medoid, revealing local flexibility independent of global
 # backbone drift.
 if [[ ! -f "${OUT_DIR}/rmsd_CA_near_LIG_5A.xvg" ]]; then
-    echo "[13/21] RMSD CA_near_LIG_5A (group 25, ${START_NS}–${END_NS} ns) → ${OUT_DIR}/rmsd_CA_near_LIG_5A.xvg"
-    echo "3 25" | "$GMX" rms \
+    echo "[13/21] RMSD CA_near_LIG_5A (group 29, ${START_NS}–${END_NS} ns) → ${OUT_DIR}/rmsd_CA_near_LIG_5A.xvg"
+    echo "3 29" | "$GMX" rms \
         -s "$MEDOID_SYS" -f "$TRIM_XTC" -n "$OUT_NDX" \
         -o "${OUT_DIR}/rmsd_CA_near_LIG_5A.xvg" -e "$END_TIME_PS"
 else
@@ -444,24 +452,20 @@ fi
 # features. Groups 30–33 must be present in index.ndx (created by
 # run_gate_latch.sh); this step is skipped with a warning if absent.
 echo "[19/21] RMSF loop subgroups (groups 30–33)"
-for GROUP_NUM in 30 31 32 33; do
+for GROUP_NUM in 25 26 27 28; do
     case $GROUP_NUM in
-        30) LABEL="ca_gate";   OUTFILE="${OUT_DIR}/rmsf_PL_ca_gate.xvg"   ;;
-        31) LABEL="ca_latch";  OUTFILE="${OUT_DIR}/rmsf_PL_ca_latch.xvg"  ;;
-        32) LABEL="ca_Lb7a5";  OUTFILE="${OUT_DIR}/rmsf_PL_ca_Lb7a5.xvg"  ;;
-        33) LABEL="ca_recoil"; OUTFILE="${OUT_DIR}/rmsf_PL_ca_recoil.xvg" ;;
+        25) LABEL="ca_gate";   OUTFILE="${OUT_DIR}/rmsf_PL_ca_gate.xvg"   ;;
+        26) LABEL="ca_latch";  OUTFILE="${OUT_DIR}/rmsf_PL_ca_latch.xvg"  ;;
+        27) LABEL="ca_Lb7a5";  OUTFILE="${OUT_DIR}/rmsf_PL_ca_Lb7a5.xvg"  ;;
+        28) LABEL="ca_recoil"; OUTFILE="${OUT_DIR}/rmsf_PL_ca_recoil.xvg" ;;
     esac
-    if grep -qE "^\[[ \t]*${LABEL}[ \t]*\]" "$OUT_NDX" 2>/dev/null; then
-        if [[ ! -f "$OUTFILE" ]]; then
-            echo "  Group ${GROUP_NUM} (${LABEL}) → ${OUTFILE}"
-            echo "$GROUP_NUM" | "$GMX" rmsf \
-                -s "$MEDOID_PL" -f "$PL_ONLY" -n "$OUT_NDX" \
-                -o "$OUTFILE" -res
-        else
-            echo "  SKIP $OUTFILE (exists)"
-        fi
+    if [[ ! -f "$OUTFILE" ]]; then
+        echo "  Group ${GROUP_NUM} (${LABEL}) → ${OUTFILE}"
+        echo "$GROUP_NUM" | "$GMX" rmsf \
+            -s "$MEDOID_PL" -f "$PL_ONLY" -n "$OUT_NDX" \
+            -o "$OUTFILE" -res
     else
-        echo "  WARNING: group '${LABEL}' (${GROUP_NUM}) not found in $OUT_NDX — skipping. Run run_gate_latch.sh first."
+        echo "  SKIP $OUTFILE (exists)"
     fi
 done
 
@@ -548,7 +552,7 @@ echo ""
 echo "  Phase 2-3 outputs ($OUT_DIR/):"
 echo "    $MEDOID_TXT_FNAME"
 echo "    medoid_PL.pdb, medoid_system.pdb"
-echo "    index.ndx  (copy of shared index with CA_near_LIG_5A as group 25)"
+echo "    index.ndx  (copy of shared index with CA_near_LIG_5A as group 29)"
 echo "    rmsd_CA_to_medoid.xvg, rmsd_CA_near_LIG_5A.xvg"
 echo "    rmsd_CA_hinge.xvg, rmsd_lig_heavy.xvg"
 echo "    $(basename "$PL_ONLY")"
