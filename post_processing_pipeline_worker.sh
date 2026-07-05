@@ -481,7 +481,7 @@ if [[ ! -f "$POCKET_NDX" ]]; then
     "$GMX" select \
         -s "$MEDOID_PL" \
         -on "$POCKET_NDX" \
-        -select "protein and resid ${POCKET_RESIDS}"
+        -select "resid ${POCKET_RESIDS}"
 fi
 
 # Pocket Rg
