@@ -13,7 +13,7 @@
 #SBATCH --mail-user=ivana.tang@colorado.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
 
-# Usage: sbatch post_processing_pipeline_worker.sh <WORKDIR> [CONFIG] [END_TIME_PS] [PHASE]
+# Usage: sbatch post_processing_pipeline_worker.sh <WORKDIR> [CONFIG] [END_TIME_PS] [PHASE] [FORCE]
 #   WORKDIR     full path to the run subdirectory (prod_md_0p9_cutoff_3dt_64x1_16PME_642dd)
 #   CONFIG      path to config.yaml (default: same directory as this script)
 #   END_TIME_PS end of the analysis window in ps (default: equil_end_ps from config, 500000)
@@ -21,6 +21,7 @@
 #   PHASE       which phase(s) to run: 1, 2, 3, or all (default: all)
 #               Phase 2 and 3 require Phase 1 outputs to already exist.
 #               Phase 3 requires Phase 2 outputs to already exist.
+#   FORCE       true to overwrite existing outputs; false to skip them (default: false)
 #
 # Phases 2-3 honour END_TIME_PS: the medoid is found within that window and all
 # RMSD/RMSF/distance outputs are written to WORKDIR/<END_NS>ns/.
@@ -42,6 +43,7 @@ WORKDIR="${1:?ERROR: WORKDIR argument required}"
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 export CONFIG="${2:-${SCRIPT_DIR}/config.yaml}"
 PHASE="${4:-all}"
+FORCE="${5:-false}"
 
 if [[ ! -f "$CONFIG" ]]; then
     echo "ERROR: config.yaml not found: $CONFIG" >&2; exit 1
@@ -52,6 +54,12 @@ fi
 if [[ "$PHASE" != "all" && "$PHASE" != "1" && "$PHASE" != "2" && "$PHASE" != "3" ]]; then
     echo "ERROR: PHASE must be 1, 2, 3, or all (got: '$PHASE')" >&2; exit 1
 fi
+if [[ "$FORCE" != "true" && "$FORCE" != "false" ]]; then
+    echo "ERROR: FORCE must be true or false (got: '$FORCE')" >&2; exit 1
+fi
+
+# Returns 0 (run the step) if FORCE=true or the output file does not exist yet.
+should_run() { [[ "$FORCE" == "true" || ! -f "$1" ]]; }
 
 FIND_MEDOID="${SCRIPT_DIR}/get_medoid.py"
 if [[ ! -f "$FIND_MEDOID" ]]; then
@@ -132,7 +140,7 @@ if [[ "$PHASE" == "all" || "$PHASE" == "1" ]]; then
 # heavy atoms, the combined Protein+LIG group used for centering/fitting,
 # the gate-loop CA selection used for hinge RMSF, and loop subgroups 25-28
 # (ca_gate 84-90, ca_latch 114-118, ca_Lb7a5 148-155, ca_recoil 154-166).
-if [[ ! -f "$NDX" ]]; then
+if should_run "$NDX"; then
     echo "[1/21] make_ndx → $NDX"
     "$GMX" make_ndx -f "$TPR" -o "$NDX" << EOF
 r LIG & ! a H*
@@ -162,7 +170,7 @@ fi
 # Step 2: PBC correction
 # Re-image molecules into the primary unit cell and center the protein+ligand
 # complex, removing periodic boundary condition artifacts before fitting.
-if [[ ! -f "$PBC_XTC" ]]; then
+if should_run "$PBC_XTC"; then
     echo "[2/21] trjconv PBC → $PBC_XTC"
     echo "23 0" | "$GMX" trjconv \
         -s "$TPR" -f "$XTC" -n "$NDX" -o "$PBC_XTC" \
@@ -174,7 +182,7 @@ fi
 # Step 3: Rotational and translational fitting
 # Align each frame to the initial structure by minimizing the RMSD of
 # protein+ligand, removing overall tumbling for cleaner structural analysis.
-if [[ ! -f "$FIT_XTC" ]]; then
+if should_run "$FIT_XTC"; then
     echo "[3/21] trjconv fit → $FIT_XTC"
     echo "23 0" | "$GMX" trjconv \
         -s "$TPR" -f "$PBC_XTC" -n "$NDX" -o "$FIT_XTC" \
@@ -186,7 +194,7 @@ fi
 # Step 4: C-alpha RMSD vs initial frame
 # Measure backbone drift over the full trajectory to verify equilibration
 # and identify the production-phase start; output used as a QC plot.
-if [[ ! -f "$RMSD" ]]; then
+if should_run "$RMSD"; then
     echo "[4/21] rms (C-alpha) → $RMSD"
     echo "3 3" | "$GMX" rms \
         -s "$TPR" -f "$FIT_XTC" -o "$RMSD"
@@ -197,7 +205,7 @@ fi
 # Step 5: Trim trajectory to equilibrated production window
 # Discard the first ${B} ps (equilibration warm-up) and retain only the
 # production-phase frames used in all downstream structural analyses.
-if [[ ! -f "$TRIM_XTC" ]]; then
+if should_run "$TRIM_XTC"; then
     echo "[5/21] trjconv trim (${B}–${E} ps) → $TRIM_XTC"
     echo "0" | "$GMX" trjconv \
         -s "$TPR" -f "$FIT_XTC" -o "$TRIM_XTC" \
@@ -218,7 +226,7 @@ if [[ "$PHASE" == "all" || "$PHASE" == "2" || "$PHASE" == "3" ]]; then
 # pairwise C-alpha RMSD distances — the most representative structure of the
 # ensemble. Used as the reference for all subsequent RMSD and RMSF calculations
 # to avoid introducing crystal-structure or first-frame bias.
-if [[ ! -f "$MEDOID_TXT" ]]; then
+if should_run "$MEDOID_TXT"; then
     echo "[6/21] get_medoid.py (stride=${MED_STRIDE}, window=${START_NS}–${END_NS} ns) → $MEDOID_TXT"
     python3 "$FIND_MEDOID" \
         -s "$TPR" -f "$TRIM_XTC" \
@@ -252,7 +260,7 @@ if [[ "$PHASE" == "all" || "$PHASE" == "3" ]]; then
 # Step 7: Extract medoid frame — Protein+Ligand
 # Dump only protein and ligand atoms at the medoid time point; used as the
 # reference topology for RMSF calculations to avoid solvent-inflated file size.
-if [[ ! -f "$MEDOID_PL" ]]; then
+if should_run "$MEDOID_PL"; then
     echo "[7/21] Extract medoid (Protein+LIG, group 23) → $MEDOID_PL"
     echo 23 | "$GMX" trjconv \
         -s "$TPR" -f "$FIT_XTC" -n "$NDX" \
@@ -264,7 +272,7 @@ fi
 # Step 8: Extract medoid frame — full system
 # Dump the complete system (including solvent) at the medoid time point;
 # used as the reference topology for distance and RMSD calculations.
-if [[ ! -f "$MEDOID_SYS" ]]; then
+if should_run "$MEDOID_SYS"; then
     echo "[8/21] Extract medoid (System, group 0) → $MEDOID_SYS"
     echo 0 | "$GMX" trjconv \
         -s "$TPR" -f "$FIT_XTC" -n "$NDX" \
@@ -277,7 +285,7 @@ fi
 # Quantify per-frame structural deviation from the representative medoid
 # structure over the production trajectory; used for conformational clustering
 # and to distinguish open/closed states.
-if [[ ! -f "${OUT_DIR}/rmsd_CA_to_medoid.xvg" ]]; then
+if should_run "${OUT_DIR}/rmsd_CA_to_medoid.xvg"; then
     echo "[9/21] rms (CA vs medoid, ${START_NS}–${END_NS} ns) → ${OUT_DIR}/rmsd_CA_to_medoid.xvg"
     echo "3 3" | "$GMX" rms \
         -s "$MEDOID_SYS" -f "$TRIM_XTC" -n "$NDX" \
@@ -290,7 +298,7 @@ fi
 # Strip solvent and ions from the trimmed trajectory, keeping only protein and
 # ligand atoms to reduce file size and accelerate MDAnalysis-based analyses
 # (R-score, water contacts, etc.).
-if [[ ! -f "$PL_ONLY" ]]; then
+if should_run "$PL_ONLY"; then
     echo "[10/21] Extract Protein+LIG trajectory (${START_NS}–${END_NS} ns) → $PL_ONLY"
     echo 23 | "$GMX" trjconv \
         -s "$MEDOID_SYS" -f "$TRIM_XTC" -n "$NDX" \
@@ -303,7 +311,7 @@ fi
 # Identify CA atoms within 5 Å of the ligand heavy atoms in the medoid
 # structure; these pocket-lining residues capture local flexibility around
 # the binding site independent of global backbone motion.
-if [[ ! -f "$CA_NDX" ]]; then
+if should_run "$CA_NDX"; then
     echo "[11/21] Select CA within 5 Å of LIG_heavy → $CA_NDX"
     "$GMX" select \
         -s "$MEDOID_SYS" -n "$NDX" \
@@ -360,7 +368,7 @@ PYEOF
 # Track conformational stability of the binding-pocket lining residues
 # relative to the medoid, revealing local flexibility independent of global
 # backbone drift.
-if [[ ! -f "${OUT_DIR}/rmsd_CA_near_LIG_5A.xvg" ]]; then
+if should_run "${OUT_DIR}/rmsd_CA_near_LIG_5A.xvg"; then
     echo "[13/21] RMSD CA_near_LIG_5A (group 29, ${START_NS}–${END_NS} ns) → ${OUT_DIR}/rmsd_CA_near_LIG_5A.xvg"
     echo "3 29" | "$GMX" rms \
         -s "$MEDOID_SYS" -f "$TRIM_XTC" -n "$OUT_NDX" \
@@ -373,7 +381,7 @@ fi
 # Monitor the conformational dynamics of the gate loop (residues 84–90),
 # the primary structural element that controls binding-pocket accessibility
 # and distinguishes open vs. closed states.
-if [[ ! -f "${OUT_DIR}/rmsd_CA_hinge.xvg" ]]; then
+if should_run "${OUT_DIR}/rmsd_CA_hinge.xvg"; then
     echo "[14/21] RMSD CA_hinge (group 24, ${START_NS}–${END_NS} ns) → ${OUT_DIR}/rmsd_CA_hinge.xvg"
     echo "3 24" | "$GMX" rms \
         -s "$MEDOID_SYS" -f "$TRIM_XTC" -n "$OUT_NDX" \
@@ -386,7 +394,7 @@ fi
 # Quantify ligand pose stability within the pocket over the production
 # trajectory, discriminating well-anchored bound states from loosely
 # associated or partially dissociated conformations.
-if [[ ! -f "${OUT_DIR}/rmsd_lig_heavy.xvg" ]]; then
+if should_run "${OUT_DIR}/rmsd_lig_heavy.xvg"; then
     echo "[15/21] RMSD LIG_heavy (group 20, ${START_NS}–${END_NS} ns) → ${OUT_DIR}/rmsd_lig_heavy.xvg"
     echo "3 20" | "$GMX" rms \
         -s "$MEDOID_SYS" -f "$TRIM_XTC" -n "$OUT_NDX" \
@@ -403,7 +411,7 @@ GRO="prod_md_500ns.gro"
 if [[ ! -f "$GRO" ]]; then
     echo "ERROR: $GRO not found in $WORKDIR" >&2; exit 1
 fi
-if [[ ! -f "$GL_NDX" ]]; then
+if should_run "$GL_NDX"; then
     echo "[16/21] Build gate–latch distance index → $GL_NDX"
     CA_GATE=$(grep -E "^\s+${GATE_RES}[A-Z]+" "$GRO" | grep -E "\s+CA\s+" | awk '{print $3}')
     CA_LATCH=$(grep -E "^\s+${LATCH_RES}[A-Z]+" "$GRO" | grep -E "\s+CA\s+" | awk '{print $3}')
@@ -422,7 +430,7 @@ fi
 # Compute the time-resolved CA–CA distance between the gate and latch; the
 # primary observable for tracking pocket closure dynamics and classifying
 # binder vs. nonbinder behaviour.
-if [[ ! -f "${OUT_DIR}/gate_latch_timeseries.xvg" ]]; then
+if should_run "${OUT_DIR}/gate_latch_timeseries.xvg"; then
     echo "[17/21] Gate–latch distance (${START_NS}–${END_NS} ns) → ${OUT_DIR}/gate_latch_timeseries.xvg"
     "$GMX" distance \
         -f "$FIT_XTC" -n "$GL_NDX" \
@@ -437,7 +445,7 @@ fi
 # Compute per-residue root-mean-square fluctuation referenced to the medoid
 # structure, capturing average mobility across the production trajectory for
 # every residue.
-if [[ ! -f "${OUT_DIR}/rmsf_PL.xvg" ]]; then
+if should_run "${OUT_DIR}/rmsf_PL.xvg"; then
     echo "[18/21] RMSF Protein+LIG (group 23) → ${OUT_DIR}/rmsf_PL.xvg"
     echo 23 | "$GMX" rmsf \
         -s "$MEDOID_PL" -f "$PL_ONLY" -n "$OUT_NDX" \
@@ -459,7 +467,7 @@ for GROUP_NUM in 25 26 27 28; do
         27) LABEL="ca_Lb7a5";  OUTFILE="${OUT_DIR}/rmsf_PL_ca_Lb7a5.xvg"  ;;
         28) LABEL="ca_recoil"; OUTFILE="${OUT_DIR}/rmsf_PL_ca_recoil.xvg" ;;
     esac
-    if [[ ! -f "$OUTFILE" ]]; then
+    if should_run "$OUTFILE"; then
         echo "  Group ${GROUP_NUM} (${LABEL}) → ${OUTFILE}"
         echo "$GROUP_NUM" | "$GMX" rmsf \
             -s "$MEDOID_PL" -f "$PL_ONLY" -n "$OUT_NDX" \
@@ -480,7 +488,7 @@ echo "[20/21] Rg and SASA"
 POCKET_NDX="${OUT_DIR}/pocket_res.ndx"
 
 # Build pocket residue index from the medoid structure (reuse if already present)
-if [[ ! -f "$POCKET_NDX" ]]; then
+if should_run "$POCKET_NDX"; then
     echo "  Building pocket residue index → $POCKET_NDX"
     "$GMX" select \
         -s "$MEDOID_PL" \
@@ -489,7 +497,7 @@ if [[ ! -f "$POCKET_NDX" ]]; then
 fi
 
 # Pocket Rg
-if [[ ! -f "${OUT_DIR}/Rg_pocket.xvg" ]]; then
+if should_run "${OUT_DIR}/Rg_pocket.xvg"; then
     echo "  gyrate (pocket) → ${OUT_DIR}/Rg_pocket.xvg"
     echo "0" | "$GMX" gyrate \
         -s "$MEDOID_PL" -f "$PL_ONLY" -n "$POCKET_NDX" \
@@ -499,7 +507,7 @@ else
 fi
 
 # Pocket SASA
-if [[ ! -f "${OUT_DIR}/sasa_pocket.xvg" ]]; then
+if should_run "${OUT_DIR}/sasa_pocket.xvg"; then
     echo "  sasa (pocket) → ${OUT_DIR}/sasa_pocket.xvg"
     echo "0" | "$GMX" sasa \
         -s "$MEDOID_PL" -f "$PL_ONLY" -n "$POCKET_NDX" \
@@ -509,7 +517,7 @@ else
 fi
 
 # Whole Protein+Ligand Rg
-if [[ ! -f "${OUT_DIR}/Rg_PL.xvg" ]]; then
+if should_run "${OUT_DIR}/Rg_PL.xvg"; then
     echo "  gyrate (Protein+LIG) → ${OUT_DIR}/Rg_PL.xvg"
     echo "Protein_LIG" | "$GMX" gyrate \
         -s "$MEDOID_PL" -f "$PL_ONLY" -n "$OUT_NDX" \
@@ -519,7 +527,7 @@ else
 fi
 
 # Whole Protein+Ligand SASA
-if [[ ! -f "${OUT_DIR}/sasa_PL.xvg" ]]; then
+if should_run "${OUT_DIR}/sasa_PL.xvg"; then
     echo "  sasa (Protein+LIG) → ${OUT_DIR}/sasa_PL.xvg"
     echo "Protein_LIG" | "$GMX" sasa \
         -s "$MEDOID_PL" -f "$PL_ONLY" -n "$OUT_NDX" \
