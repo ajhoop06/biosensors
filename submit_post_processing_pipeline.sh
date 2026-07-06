@@ -4,15 +4,21 @@
 # search, and all medoid-referenced analyses) for that sequence directory.
 #
 # Usage:
-#   bash submit_post_processing_pipeline.sh                         # seq_ids.txt + config.yaml
-#   bash submit_post_processing_pipeline.sh my_list.txt             # custom sequence list
-#   bash submit_post_processing_pipeline.sh my_list.txt my_cfg.yaml # custom list and config
+#   bash submit_post_processing_pipeline.sh                                    # seq_ids.txt, config.yaml, all phases, no force
+#   bash submit_post_processing_pipeline.sh my_list.txt                        # custom sequence list
+#   bash submit_post_processing_pipeline.sh my_list.txt my_cfg.yaml            # custom list and config
+#   bash submit_post_processing_pipeline.sh my_list.txt my_cfg.yaml all true   # force-overwrite all existing outputs
+#   bash submit_post_processing_pipeline.sh seq_ids.txt config.yaml 1          # phase 1 only
+#   PHASE: 1, 2, 3, or all (default: all)
+#   FORCE: true or false (default: false)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SEQ_LIST="${1:-${SCRIPT_DIR}/seq_ids.txt}"
 CONFIG="${2:-${SCRIPT_DIR}/config.yaml}"
+PHASE="${3:-all}"
+FORCE="${4:-false}"
 WORKER="${SCRIPT_DIR}/post_processing_pipeline_worker.sh"
 
 for f in "$SEQ_LIST" "$CONFIG" "$WORKER"; do
@@ -63,7 +69,7 @@ while IFS=$'\t' read -r seq_id seq_type custom_path || [[ -n "$seq_id" ]]; do
 
     echo "Submitting: $seq_id  [$seq_type → $subdir]"
     echo "           WORKDIR: $WORKDIR"
-    sbatch --job-name="pipeline_${seq_id}" "$WORKER" "$WORKDIR" "$CONFIG"
+    sbatch --job-name="pipeline_${seq_id}" "$WORKER" "$WORKDIR" "$CONFIG" 500000 "$PHASE" "$FORCE"
     (( submitted++ )) || true
 
 done < "$SEQ_LIST"
