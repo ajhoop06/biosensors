@@ -72,7 +72,6 @@ pair_0351_nb	False Positive
 pair_0502_nb	False Positive
 pair_0506_nb	False Positive
 pair_0647_nb	False Positive
-pair_0664_nb	False Positive
 pair_0776_nb	False Positive
 pair_0777_nb	False Positive
 pair_0782_nb	False Positive

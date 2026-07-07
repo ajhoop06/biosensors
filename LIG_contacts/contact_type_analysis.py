@@ -49,7 +49,7 @@ def get_type_subdir(seq_id):
 
     Examples:
         pair_3059_binder    -> binders
-        pair_0664_nb        -> nonbinders
+        pair_0777_nb        -> nonbinders
         pair_0008_low_pkt   -> neg_low_pkt
         pair_0715_fail_gate -> neg_fail_gate
     """
