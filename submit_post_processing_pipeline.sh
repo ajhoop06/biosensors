@@ -26,10 +26,15 @@ for f in "$SEQ_LIST" "$CONFIG" "$WORKER"; do
 done
 
 # ── HPC environment (needed for python3 + PyYAML below) ───────────────────────
+# `conda activate` requires the shell function from `conda shell.bash hook`;
+# this script runs as a plain (non-login) bash process via `bash script.sh`,
+# so ~/.bashrc's `conda init` block is never sourced and the bare `conda`
+# binary doesn't support activate/deactivate at all without it.
 module purge
 module load gcc
 module load openmpi
 module load anaconda
+eval "$(conda shell.bash hook)"
 conda activate biosensors
 
 # ── Read base paths and seq_type → subdirectory map from config.yaml ──────────
