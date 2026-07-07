@@ -26,19 +26,19 @@ for f in "$SEQ_LIST" "$CONFIG" "$WORKER"; do
 done
 
 # ── HPC environment (needed for python3 + PyYAML below) ───────────────────────
-# `conda activate` requires the shell function from `conda shell.bash hook`;
-# this script runs as a plain (non-login) bash process via `bash script.sh`,
-# so ~/.bashrc's `conda init` block is never sourced and the bare `conda`
-# binary doesn't support activate/deactivate at all without it.
+# `conda activate`/`conda shell.bash hook` need the shell integration from
+# `conda init`, which this cluster's conda build doesn't expose when run as a
+# plain (non-login) bash process via `bash script.sh`. `conda run` is a plain
+# subcommand that works without any shell hook, so use that instead.
 module purge
 module load gcc
 module load openmpi
 module load anaconda
-eval "$(conda shell.bash hook)"
-conda activate biosensors
 
 # ── Read base paths and seq_type → subdirectory map from config.yaml ──────────
-eval "$(python3 << PYEOF
+# --no-capture-output is required: conda run buffers stdin/stdout by default,
+# which silently drops the heredoc-piped script and its output.
+eval "$(conda run --no-capture-output -n biosensors python3 << PYEOF
 import yaml
 with open("${CONFIG}") as f:
     d = yaml.safe_load(f)
