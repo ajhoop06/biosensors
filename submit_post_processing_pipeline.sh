@@ -25,6 +25,13 @@ for f in "$SEQ_LIST" "$CONFIG" "$WORKER"; do
     [[ -f "$f" ]] || { echo "ERROR: file not found: $f" >&2; exit 1; }
 done
 
+# ── HPC environment (needed for python3 + PyYAML below) ───────────────────────
+module purge
+module load gcc
+module load openmpi
+module load anaconda
+conda activate biosensors
+
 # ── Read base paths and seq_type → subdirectory map from config.yaml ──────────
 eval "$(python3 << PYEOF
 import yaml
