@@ -3,14 +3,14 @@
 #SBATCH --job-name=rdd56seq16_prod_md_PYR1_LCA
 #SBATCH --output=output_benchmark_%j.out                  # Output file
 #SBATCH --error=error_benchmark_%j.err                    # Error file
-#SBATCH --account=ucb-general
-#SBATCH --partition=amilan
+#SBATCH --account=ucb351_asc4
+#SBATCH --partition=acpu
 #SBATCH --time=00:05:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=56
 #SBATCH --cpus-per-task=1
 #SBATCH --constraint=ib
-#SBATCH --qos=normal
+#SBATCH --qos=cpu-normal
 #SBATCH --mail-user=ivana.tang@colorado.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
 

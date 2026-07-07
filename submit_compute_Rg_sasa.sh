@@ -3,13 +3,13 @@
 #SBATCH --output=logs/output_%A_%a.out
 #SBATCH --error=logs/error_%A_%a.err
 #SBATCH --account=ucb351_asc4
-#SBATCH --partition=amilan
+#SBATCH --partition=acpu
 #SBATCH --time=03:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --constraint=ib
-#SBATCH --qos=normal
+#SBATCH --qos=cpu-normal
 #SBATCH --mail-user=ivana.tang@colorado.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --array=1-128%20

@@ -4,13 +4,13 @@
 #SBATCH --output=output_%j.out                  # Output file
 #SBATCH --error=error_%j.err                    # Error file
 #SBATCH --account=ucb351_asc4
-#SBATCH --partition=amilan
+#SBATCH --partition=acpu
 #SBATCH --time=00:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
 #SBATCH --constraint=ib
-#SBATCH --qos=normal
+#SBATCH --qos=cpu-normal
 #SBATCH --mail-user=ivana.tang@colorado.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
 
