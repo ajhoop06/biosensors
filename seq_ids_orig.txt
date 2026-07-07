@@ -55,7 +55,6 @@ pair_0506_nb	False Positive
 pair_0647_nb	False Positive
 pair_0777_nb	False Positive
 pair_0827_nb	False Positive
-pair_0664_nb	False Positive
 pair_1824_nb	False Positive
 pair_1939_nb	False Positive
 pair_0822_nb	False Positive
