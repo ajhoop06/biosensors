@@ -3,13 +3,13 @@
 #SBATCH --job-name=getRscores
 #SBATCH --output=output_%j.out
 #SBATCH --account=ucb351_asc4
-#SBATCH --partition=amilan
+#SBATCH --partition=acpu
 #SBATCH --time=02:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
 #SBATCH --constraint=ib
-#SBATCH --qos=normal
+#SBATCH --qos=cpu-normal
 #SBATCH --mail-user=ivana.tang@colorado.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
 
@@ -40,7 +40,7 @@ module purge
 module load anaconda
 conda activate biosensors
 
-OUT_DIR=/scratch/alpine/ivta1597/LCA_boltz_models/water_analysis_flex
+OUT_DIR=/projects/ivta1597/biosensors/water_analysis
 
 echo "============================================================"
 echo "  Aggregating R/D/W scores"
