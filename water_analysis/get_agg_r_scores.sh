@@ -1,6 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=getRscores
+#SBATCH --error=error_%j.err
 #SBATCH --output=output_%j.out
 #SBATCH --account=ucb351_asc4
 #SBATCH --partition=acpu
