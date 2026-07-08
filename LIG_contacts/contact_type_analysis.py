@@ -70,6 +70,19 @@ def get_type_subdir(seq_id):
         f"Expected suffix from: {list(TYPE_SUBDIR.keys())}"
     )
 
+
+def run_dir(seq_id):
+    """Directory containing a sequence's medoid_PL.pdb / PL_only_*.xtc.
+    Newer pipeline runs write these under runrel/500ns/; older ones write
+    directly into runrel/. Prefer whichever location actually has
+    medoid_PL.pdb rather than guessing from seq_id (see the equivalent
+    rmsf_run_dir() in extract_rmsf_feats.py for why guessing is unreliable)."""
+    flat_dir   = os.path.join(base, get_type_subdir(seq_id), seq_id, runrel)
+    nested_dir = os.path.join(flat_dir, "500ns")
+    if os.path.exists(os.path.join(nested_dir, "medoid_PL.pdb")):
+        return nested_dir
+    return flat_dir
+
 # ─────────────────────────────────────────────
 # PARAMETERS
 # ─────────────────────────────────────────────
@@ -113,8 +126,7 @@ def parse_args():
 # LOAD TRAJECTORY
 # ─────────────────────────────────────────────
 def load_trajectory(seq_id, start_ps, end_ps):
-    type_subdir = get_type_subdir(seq_id)
-    seq_dir  = os.path.join(base, type_subdir, seq_id, runrel)
+    seq_dir  = run_dir(seq_id)
     top_path = os.path.join(seq_dir, "medoid_PL.pdb")
     xtc_path = os.path.join(seq_dir, "PL_only_40_500ns.xtc")
 
