@@ -18,9 +18,10 @@ import pandas as pd
 # ─────────────────────────────────────────────
 # PATHS — mirror contact_type_analysis.py
 # ─────────────────────────────────────────────
-# Results live on scratch (written there by contact_type_analysis.py,
-# alongside the trajectory data); seq_ids.txt is the persistent repo copy.
-base_scratch = "/scratch/alpine/ivta1597/LCA_boltz_models/LIG_contacts"
+# Both per-sequence results and the combined output CSV live in the
+# persistent repo location (not scratch), so they survive scratch's
+# 90-day auto-deletion.
+out_dir = "/projects/ivta1597/biosensors/LIG_contacts"
 
 # ─────────────────────────────────────────────
 # ARGUMENTS
@@ -37,11 +38,13 @@ args = parser.parse_args()
 seq_ids_file = args.seq_list
 
 TAG         = f"{int(args.start_ns)}_{int(args.end_ns)}ns"
-results_dir = os.path.join(base_scratch, f"contact_type_results_{TAG}")
-out_path    = os.path.join(results_dir, f"contact_features_all_{TAG}.csv")
+results_dir = os.path.join(out_dir, f"contact_type_results_{TAG}")
+out_path    = os.path.join(out_dir, f"contact_features_all_{TAG}.csv")
+os.makedirs(out_dir, exist_ok=True)
 
 print(f"Window      : {args.start_ns:.0f}-{args.end_ns:.0f} ns  (tag: {TAG})")
 print(f"Results dir : {results_dir}")
+print(f"Output dir  : {out_dir}")
 
 # ─────────────────────────────────────────────
 # LOAD
