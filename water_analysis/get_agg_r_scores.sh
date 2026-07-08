@@ -15,16 +15,18 @@
 
 # ============================================================
 # Usage:
-#   sbatch get_agg_r_scores.sh [start_ns] [end_ns]
+#   sbatch get_agg_r_scores.sh [seq_list] [start_ns] [end_ns]
 #
 # Arguments:
+#   seq_list - path to seq_ids.txt-style sequence list (default: seq_ids.txt)
 #   start_ns - start of analysis window in ns (default: 40)
 #   end_ns   - end of analysis window in ns   (default: 500)
 #
 # Examples:
-#   sbatch get_agg_r_scores.sh              # full 40–500 ns
-#   sbatch get_agg_r_scores.sh 40 250       # 250 ns window
-#   sbatch get_agg_r_scores.sh 40 300       # 300 ns window
+#   sbatch get_agg_r_scores.sh                                # seq_ids.txt, full 40–500 ns
+#   sbatch get_agg_r_scores.sh seq_ids_missing_water.txt       # custom list, full 40–500 ns
+#   sbatch get_agg_r_scores.sh seq_ids.txt 40 250              # 250 ns window
+#   sbatch get_agg_r_scores.sh seq_ids.txt 40 300              # 300 ns window
 #
 # Output files:
 #   r_scores_all_sequences_{start}_{end}ns.csv
@@ -33,8 +35,9 @@
 
 set -euo pipefail
 
-START_NS=${1:-40}
-END_NS=${2:-500}
+SEQ_LIST=${1:-seq_ids.txt}
+START_NS=${2:-40}
+END_NS=${3:-500}
 
 module purge
 module load anaconda
@@ -44,12 +47,13 @@ OUT_DIR=/projects/ivta1597/biosensors/water_analysis
 
 echo "============================================================"
 echo "  Aggregating R/D/W scores"
+echo "  Seq list : $SEQ_LIST"
 echo "  Window   : ${START_NS}–${END_NS} ns"
 echo "  Output   : $OUT_DIR"
 echo "============================================================"
 
 python aggregate_r_scores.py \
-    --seq_list seq_ids.txt  \
+    --seq_list $SEQ_LIST    \
     --out_dir  $OUT_DIR     \
     --start-ns $START_NS    \
     --end-ns   $END_NS
