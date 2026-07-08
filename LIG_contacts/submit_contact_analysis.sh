@@ -12,7 +12,7 @@
 #   $1  start_ns  (default: 40)
 #   $2  end_ns    (default: 500)
 
-BASE="/scratch/alpine/ivta1597/LCA_boltz_models/LIG_contacts_flex"
+BASE="/scratch/alpine/ivta1597/LCA_boltz_models/LIG_contacts"
 SEQ_IDS_FILE="${BASE}/seq_ids.txt"
 WORKER="${BASE}/contact_type_worker.sh"
 

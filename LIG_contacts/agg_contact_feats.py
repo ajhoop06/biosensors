@@ -18,7 +18,7 @@ import pandas as pd
 # ─────────────────────────────────────────────
 # PATHS — mirror contact_type_analysis.py
 # ─────────────────────────────────────────────
-base_contacts = "/scratch/alpine/ivta1597/LCA_boltz_models/LIG_contacts_flex"
+base_contacts = "/scratch/alpine/ivta1597/LCA_boltz_models/LIG_contacts"
 seq_ids_file  = os.path.join(base_contacts, "seq_ids.txt")
 
 # ─────────────────────────────────────────────

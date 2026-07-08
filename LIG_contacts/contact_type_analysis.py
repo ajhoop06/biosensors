@@ -29,7 +29,7 @@ import mdtraj as md
 base    = "/scratch/alpine/ivta1597/LCA_boltz_models"
 runrel  = "prod_md_0p9_cutoff_3dt_64x1_16PME_642dd"
 
-output_dir = os.path.join(base, "LIG_contacts_flex/contact_type_results")   # default; overridden by TAG in main()
+output_dir = os.path.join(base, "LIG_contacts/contact_type_results")   # default; overridden by TAG in main()
 
 # ─────────────────────────────────────────────
 # TYPE SUBDIRECTORY MAP
@@ -286,7 +286,7 @@ def main():
 
     # Tagged output directory — one per time window, consistent with
     # water_contacts_{TAG}/ naming used by the water analysis pipeline
-    tagged_output_dir = os.path.join(base, f"LIG_contacts_flex/contact_type_results_{TAG}")
+    tagged_output_dir = os.path.join(base, f"LIG_contacts/contact_type_results_{TAG}")
     os.makedirs(tagged_output_dir, exist_ok=True)
 
     print(f"\n=== contact_type_analysis.py  |  seq_id={seq_id}  "
