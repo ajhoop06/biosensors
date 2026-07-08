@@ -25,9 +25,9 @@
 # ─────────────────────────────────────────────
 # USER VARIABLES
 # ─────────────────────────────────────────────
-PYTHON_SCRIPT="/scratch/alpine/ivta1597/LCA_boltz_models/LIG_contacts/contact_type_analysis.py"
+PYTHON_SCRIPT="/projects/ivta1597/biosensors/LIG_contacts/contact_type_analysis.py"
 CONDA_ENV="biosensors"
-LOG_DIR="/scratch/alpine/ivta1597/LCA_boltz_models/LIG_contacts/logs"
+LOG_DIR="/projects/ivta1597/biosensors/LIG_contacts/logs"
 
 # ─────────────────────────────────────────────
 set -euo pipefail

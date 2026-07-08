@@ -1,23 +1,26 @@
 #!/bin/bash
 # submit_contact_analysis.sh
 # ---------------------------
-# Submits one SLURM job per sequence in seq_ids.txt
+# Submits one SLURM job per sequence in seq_list
 #
 # Usage:
-#   bash submit_contact_analysis.sh                  # full 40–500 ns (default)
-#   bash submit_contact_analysis.sh 40 250           # 250 ns window
-#   bash submit_contact_analysis.sh 40 300           # 300 ns window
+#   bash submit_contact_analysis.sh                                   # seq_ids_orig.txt, full 40–500 ns
+#   bash submit_contact_analysis.sh seq_ids_missing_water.txt         # custom list, full 40–500 ns
+#   bash submit_contact_analysis.sh seq_ids_orig.txt 40 250           # 250 ns window
+#   bash submit_contact_analysis.sh seq_ids_orig.txt 40 300           # 300 ns window
 #
 # Arguments:
-#   $1  start_ns  (default: 40)
-#   $2  end_ns    (default: 500)
+#   $1  seq_list  - path to seq_ids.txt-style sequence list
+#                   (default: /projects/ivta1597/biosensors/seq_ids_orig.txt)
+#   $2  start_ns  (default: 40)
+#   $3  end_ns    (default: 500)
 
-BASE="/scratch/alpine/ivta1597/LCA_boltz_models/LIG_contacts"
-SEQ_IDS_FILE="${BASE}/seq_ids.txt"
+BASE="/projects/ivta1597/biosensors/LIG_contacts"
 WORKER="${BASE}/contact_type_worker.sh"
 
-START_NS="${1:-40}"
-END_NS="${2:-500}"
+SEQ_IDS_FILE="${1:-/projects/ivta1597/biosensors/seq_ids_orig.txt}"
+START_NS="${2:-40}"
+END_NS="${3:-500}"
 
 echo "============================================================"
 echo "  Contact type analysis submission"

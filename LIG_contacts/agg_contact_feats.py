@@ -18,21 +18,26 @@ import pandas as pd
 # ─────────────────────────────────────────────
 # PATHS — mirror contact_type_analysis.py
 # ─────────────────────────────────────────────
-base_contacts = "/scratch/alpine/ivta1597/LCA_boltz_models/LIG_contacts"
-seq_ids_file  = os.path.join(base_contacts, "seq_ids.txt")
+# Results live on scratch (written there by contact_type_analysis.py,
+# alongside the trajectory data); seq_ids.txt is the persistent repo copy.
+base_scratch = "/scratch/alpine/ivta1597/LCA_boltz_models/LIG_contacts"
 
 # ─────────────────────────────────────────────
 # ARGUMENTS
 # ─────────────────────────────────────────────
 parser = argparse.ArgumentParser()
+parser.add_argument('--seq_list', default="/projects/ivta1597/biosensors/seq_ids_orig.txt",
+                    help='Path to seq_ids.txt-style sequence list, used only for the '
+                         'coverage check (default: seq_ids_orig.txt in the repo root)')
 parser.add_argument('--start-ns', type=float, default=40.0,
                     help='Start of analysis window in ns (default: 40)')
 parser.add_argument('--end-ns',   type=float, default=500.0,
                     help='End of analysis window in ns (default: 500)')
 args = parser.parse_args()
+seq_ids_file = args.seq_list
 
 TAG         = f"{int(args.start_ns)}_{int(args.end_ns)}ns"
-results_dir = os.path.join(base_contacts, f"contact_type_results_{TAG}")
+results_dir = os.path.join(base_scratch, f"contact_type_results_{TAG}")
 out_path    = os.path.join(results_dir, f"contact_features_all_{TAG}.csv")
 
 print(f"Window      : {args.start_ns:.0f}-{args.end_ns:.0f} ns  (tag: {TAG})")
@@ -60,7 +65,7 @@ combined = pd.concat(dfs, ignore_index=True)
 # ─────────────────────────────────────────────
 if os.path.exists(seq_ids_file):
     with open(seq_ids_file) as fh:
-        all_ids = [l.split()[0] for l in fh if l.strip()]
+        all_ids = [l.split()[0] for l in fh if l.strip() and not l.startswith('#')]
     missing = set(all_ids) - set(combined["seq_id"])
     if missing:
         print(f"WARNING: {len(missing)} sequences missing results: {missing}")
