@@ -14,6 +14,13 @@ GMX="/projects/ivta1597/pkgs/gromacs-2025.3/bin/gmx"
 BASE="/scratch/alpine/ivta1597/LCA_boltz_models"
 RUNREL="prod_md_0p9_cutoff_3dt_64x1_16PME_642dd"
 POCKET_RESIDS="59 60 61 62 79 81 83 87 88 89 91 92 94 108 109 110 115 117 120 122 141 158 159 160 163 164 167"
+# gmx select's parser rejects a bare "resid <27 space-separated values>" list
+# on GROMACS 2025.3 ("Invalid selection ... Near 'and'"); build an explicit
+# or-chain instead, which is unambiguous regardless of that grammar detail.
+POCKET_RESID_EXPR=""
+for _id in $POCKET_RESIDS; do
+    POCKET_RESID_EXPR="${POCKET_RESID_EXPR:+$POCKET_RESID_EXPR or }resid $_id"
+done
 REGION="whole"
 SEQ_IDS=""
 
@@ -111,7 +118,7 @@ while IFS=$'\t' read -r folder_name label custom_base; do
             "$GMX" select \
                 -s "${rundir}/medoid_PL.pdb" \
                 -on "$ndx" \
-                -select "protein and resid $POCKET_RESIDS" \
+                -select "protein and ($POCKET_RESID_EXPR)" \
                 2>> "${rundir}/${RG_LOG}"
         fi
         if [[ ! -f "$ndx" ]]; then
