@@ -12,6 +12,7 @@ pair_3098_binder	Binder
 pair_3059_nb	False Positive
 pair_3062_binder	Binder
 pair_3063_binder	Binder
+#pair_3064_binder	Binder	# omitted: flipped ligand orientation in predicted pocket
 pair_3066_binder	Binder
 pair_3067_binder	Binder
 pair_3068_binder	Binder
@@ -130,6 +131,7 @@ pair_1745_fail_gate	Fail Geometry
 bind_019_binder	Binder
 bind_020_binder	Binder
 bind_022_binder	Binder
+#bind_033_binder	Binder	# omitted: flipped ligand orientation in predicted pocket
 bind_034_binder	Binder
 bind_041_binder	Binder
 bind_043_binder	Binder
@@ -142,6 +144,7 @@ bind_099_binder	Binder
 bind_100_binder	Binder
 bind_101_binder	Binder
 bind_102_binder	Binder
+#bind_109_binder	Binder	# omitted: flipped ligand orientation in predicted pocket
 bind_110_binder	Binder
 pair_3061_binder	Binder
 nonb_006_nb	False Positive
@@ -149,11 +152,13 @@ nonb_008_nb	False Positive
 nonb_009_nb	False Positive
 nonb_010_nb	False Positive
 nonb_011_nb	False Positive
+#nonb_012_nb	False Positive	# omitted: flipped ligand orientation in predicted pocket
 nonb_013_nb	False Positive
 nonb_014_nb	False Positive
 nonb_017_nb	False Positive
 nonb_018_nb	False Positive
 #nonb_019_nb	False Positive	# omitted: prod_md_500ns.xtc corrupted ~225ns, resimulating
+#nonb_020_nb	False Positive	# omitted: flipped ligand orientation in predicted pocket
 nonb_021_nb	False Positive
 nonb_022_nb	False Positive
 nonb_023_nb	False Positive
@@ -171,6 +176,7 @@ nonb_051_nb	False Positive
 nonb_052_nb	False Positive
 nonb_053_nb	False Positive
 nonb_054_nb	False Positive
+#nonb_055_nb	False Positive	# omitted: flipped ligand orientation in predicted pocket
 nonb_056_nb	False Positive
 nonb_066_nb	False Positive
 nonb_067_nb	False Positive
