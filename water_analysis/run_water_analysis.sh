@@ -16,18 +16,26 @@
 
 # ============================================================
 # Usage:
-#   sbatch run_water_analysis.sh <seq_id> <seq_type> [start_ns] [end_ns]
+#   sbatch run_water_analysis.sh <seq_id> <seq_type> [start_ns] [end_ns] [ligand_region]
 #
 # Arguments:
-#   seq_id    - sequence identifier (e.g. pair_3059_binder)
-#   seq_type  - directory group (binders | nonbinders | neg_low_pkt | neg_fail_gate)
-#   start_ns  - start of analysis window in ns (default: 40)
-#   end_ns    - end of analysis window in ns   (default: 500)
+#   seq_id         - sequence identifier (e.g. pair_3059_binder)
+#   seq_type       - directory group (binders | nonbinders | neg_low_pkt | neg_fail_gate)
+#   start_ns       - start of analysis window in ns (default: 40)
+#   end_ns         - end of analysis window in ns   (default: 500)
+#   ligand_region  - whole | core | tail (default: whole)
 #
 # Examples:
-#   sbatch run_water_analysis.sh pair_3059_binder binders           # full 500 ns
-#   sbatch run_water_analysis.sh pair_3059_binder binders 40 250    # 250 ns window
-#   sbatch run_water_analysis.sh pair_3059_binder binders 40 300    # 300 ns window
+#   sbatch run_water_analysis.sh pair_3059_binder binders                    # full 500 ns
+#   sbatch run_water_analysis.sh pair_3059_binder binders 40 250             # 250 ns window
+#   sbatch run_water_analysis.sh pair_3059_binder binders 40 300             # 300 ns window
+#   sbatch run_water_analysis.sh pair_3059_binder binders 40 500 core        # steroid core only
+#   sbatch run_water_analysis.sh pair_3059_binder binders 40 500 tail        # carboxylate tail only
+#
+# NOTE: Hbond_threshold.py and water_hbond_stability.py (steps 2-3) always
+# select the whole ligand and read/write the unsuffixed water_contacts_{TAG}
+# path, so they are only meaningful for ligand_region=whole. They are
+# skipped automatically for core/tail runs.
 # ============================================================
 
 set -euo pipefail
@@ -40,21 +48,33 @@ seq_id=$1
 seq_type=$2
 start_ns=${3:-40}
 end_ns=${4:-500}
+ligand_region=${5:-whole}
 
 echo "============================================================"
 echo "  Water contact analysis"
 echo "  seq_id   : $seq_id"
 echo "  seq_type : $seq_type"
 echo "  window   : ${start_ns}–${end_ns} ns"
+echo "  region   : ${ligand_region}"
 echo "  start    : $(date)"
 echo "============================================================"
 
 echo ""
 echo "=== Step 1: R_score_calc.py ==="
-python R_score_calc.py --seq_id   $seq_id   --seq_type $seq_type --start-ns $start_ns --end-ns   $end_ns
+python R_score_calc.py --seq_id $seq_id --seq_type $seq_type --start-ns $start_ns --end-ns $end_ns --ligand-region $ligand_region
 if [ $? -ne 0 ]; then
     echo "ERROR: R_score_calc.py failed for $seq_id"
     exit 1
+fi
+
+if [ "$ligand_region" != "whole" ]; then
+    echo ""
+    echo "============================================================"
+    echo "  Region-restricted run ($ligand_region): skipping"
+    echo "  Hbond_threshold.py / water_hbond_stability.py (whole-ligand only)."
+    echo "  End: $(date)"
+    echo "============================================================"
+    exit 0
 fi
 
 echo ""

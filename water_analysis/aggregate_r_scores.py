@@ -61,6 +61,9 @@ def parse_args():
                         help='Start of analysis window in ns (default: 40)')
     parser.add_argument('--end-ns',   type=float, default=500.0,
                         help='End of analysis window in ns (default: 500)')
+    parser.add_argument('--ligand-region', choices=['whole', 'core', 'tail'], default='whole',
+                        help='Ligand region the underlying R_score_calc.py runs were '
+                             'restricted to (default: whole)')
     return parser.parse_args()
 
 
@@ -89,19 +92,20 @@ def load_seq_list(args):
     raise ValueError("Provide either --seq_list or --seq_ids")
 
 
-def get_csv_path(seq_id, base, custom_dir, tag):
+def get_csv_path(seq_id, base, custom_dir, tag, region_tag=""):
     """
     Return the full path to the R_scores CSV for this sequence.
 
     For default paths, infers subdirectory from seq_id suffix and appends
-    water_contacts_{tag}/{seq_id}_R_scores_{tag}.csv.
+    water_contacts_{tag}{region_tag}/{seq_id}_R_scores_{tag}{region_tag}.csv.
 
     For custom paths, custom_dir is the parent directory that CONTAINS
-    water_contacts_{tag}/ (i.e. the sequence-level or HMR/dodecahedron dir).
+    water_contacts_{tag}{region_tag}/ (i.e. the sequence-level or
+    HMR/dodecahedron dir).
     """
     if custom_dir:
-        return os.path.join(custom_dir, f"water_contacts_{tag}",
-                            f"{seq_id}_R_scores_{tag}.csv")
+        return os.path.join(custom_dir, f"water_contacts_{tag}{region_tag}",
+                            f"{seq_id}_R_scores_{tag}{region_tag}.csv")
 
     if seq_id.endswith('_binder'):
         subdir = 'binders'
@@ -115,11 +119,11 @@ def get_csv_path(seq_id, base, custom_dir, tag):
         subdir = None
 
     if subdir:
-        return os.path.join(base, subdir, seq_id, f"water_contacts_{tag}",
-                            f"{seq_id}_R_scores_{tag}.csv")
+        return os.path.join(base, subdir, seq_id, f"water_contacts_{tag}{region_tag}",
+                            f"{seq_id}_R_scores_{tag}{region_tag}.csv")
 
-    return os.path.join(base, seq_id, f"water_contacts_{tag}",
-                        f"{seq_id}_R_scores_{tag}.csv")
+    return os.path.join(base, seq_id, f"water_contacts_{tag}{region_tag}",
+                        f"{seq_id}_R_scores_{tag}{region_tag}.csv")
 
 
 # ---------------------------------------------------------------------------
@@ -132,8 +136,9 @@ if __name__ == "__main__":
 
     # ── Derive time window tag ─────────────────────────────────────────────
     TAG = f"{int(args.start_ns)}_{int(args.end_ns)}ns"
+    REGION_TAG = "" if args.ligand_region == "whole" else f"_{args.ligand_region}"
     print(f"Analysis window: {args.start_ns:.0f}–{args.end_ns:.0f} ns  "
-          f"(tag: {TAG})")
+          f"(tag: {TAG})  region: {args.ligand_region}")
 
     r_rows       = []   # R-score rows (NaN for no contact)
     dw_rows      = []   # D and W rows (0.0 for no contact)
@@ -141,7 +146,7 @@ if __name__ == "__main__":
     missing      = []
 
     for seq_id, seq_type, custom_dir in seq_list:
-        path = get_csv_path(seq_id, args.base, custom_dir, TAG)
+        path = get_csv_path(seq_id, args.base, custom_dir, TAG, REGION_TAG)
 
         if not os.path.exists(path):
             print(f"  MISSING: {path}")
@@ -189,7 +194,7 @@ if __name__ == "__main__":
 
     # ── Save R-score CSV ──────────────────────────────────────────────────
     r_df   = pd.DataFrame(r_rows)
-    r_path = os.path.join(args.out_dir, f"r_scores_all_sequences_{TAG}.csv")
+    r_path = os.path.join(args.out_dir, f"r_scores_all_sequences_{TAG}{REGION_TAG}.csv")
     r_df.to_csv(r_path, index=False, na_rep='')
     print(f"\nR-scores saved  -> {r_path}")
     print(f"  Shape: {r_df.shape}  "
@@ -197,7 +202,7 @@ if __name__ == "__main__":
 
     # ── Save D/W CSV ──────────────────────────────────────────────────────
     dw_df   = pd.DataFrame(dw_rows)
-    dw_path = os.path.join(args.out_dir, f"dw_scores_all_sequences_{TAG}.csv")
+    dw_path = os.path.join(args.out_dir, f"dw_scores_all_sequences_{TAG}{REGION_TAG}.csv")
     dw_df.to_csv(dw_path, index=False)
     print(f"D/W scores saved -> {dw_path}")
     print(f"  Shape: {dw_df.shape}  "

@@ -2,11 +2,13 @@
 # contact_type_worker.sh
 # ----------------------
 # SLURM worker script for a single sequence.
-# SEQ_ID, START_NS, END_NS are passed in via --export by submit_contact_analysis.sh
+# SEQ_ID, START_NS, END_NS, LIGAND_REGION are passed in via --export by
+# submit_contact_analysis.sh
 #
 # Usage (via submit_contact_analysis.sh):
 #   sbatch --export=SEQ_ID=pair_3059_binder,START_NS=40,END_NS=500 contact_type_worker.sh
 #   sbatch --export=SEQ_ID=pair_3059_binder,START_NS=40,END_NS=250 contact_type_worker.sh
+#   sbatch --export=SEQ_ID=pair_3059_binder,START_NS=40,END_NS=500,LIGAND_REGION=core contact_type_worker.sh
 
 #SBATCH --job-name=contact_type
 #SBATCH --output=logs/contact_type_%j.out
@@ -42,11 +44,13 @@ fi
 # Apply defaults for optional window args
 START_NS="${START_NS:-40}"
 END_NS="${END_NS:-500}"
+LIGAND_REGION="${LIGAND_REGION:-whole}"
 
 echo "──────────────────────────────────────────"
 echo "Job ID     : ${SLURM_JOB_ID}"
 echo "Seq ID     : ${SEQ_ID}"
 echo "Window     : ${START_NS}–${END_NS} ns"
+echo "Region     : ${LIGAND_REGION}"
 echo "Node       : $(hostname)"
 echo "Start time : $(date)"
 echo "──────────────────────────────────────────"
@@ -55,8 +59,9 @@ module purge
 module load anaconda
 conda activate "${CONDA_ENV}"
 
-python "${PYTHON_SCRIPT}" "${SEQ_ID}" \
-    --start-ns "${START_NS}"          \
-    --end-ns   "${END_NS}"
+python "${PYTHON_SCRIPT}" "${SEQ_ID}"    \
+    --start-ns "${START_NS}"             \
+    --end-ns   "${END_NS}"               \
+    --ligand-region "${LIGAND_REGION}"
 
 echo "Finished at: $(date)"

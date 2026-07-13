@@ -34,15 +34,20 @@ parser.add_argument('--start-ns', type=float, default=40.0,
                     help='Start of analysis window in ns (default: 40)')
 parser.add_argument('--end-ns',   type=float, default=500.0,
                     help='End of analysis window in ns (default: 500)')
+parser.add_argument('--ligand-region', choices=['whole', 'core', 'tail'], default='whole',
+                    help='Ligand region the underlying contact_type_analysis.py runs '
+                         'were restricted to (default: whole)')
 args = parser.parse_args()
 seq_ids_file = args.seq_list
 
 TAG         = f"{int(args.start_ns)}_{int(args.end_ns)}ns"
-results_dir = os.path.join(out_dir, f"contact_type_results_{TAG}")
-out_path    = os.path.join(out_dir, f"contact_features_all_{TAG}.csv")
+REGION_TAG  = "" if args.ligand_region == "whole" else f"_{args.ligand_region}"
+results_dir = os.path.join(out_dir, f"contact_type_results_{TAG}{REGION_TAG}")
+out_path    = os.path.join(out_dir, f"contact_features_all_{TAG}{REGION_TAG}.csv")
 os.makedirs(out_dir, exist_ok=True)
 
 print(f"Window      : {args.start_ns:.0f}-{args.end_ns:.0f} ns  (tag: {TAG})")
+print(f"Region      : {args.ligand_region}")
 print(f"Results dir : {results_dir}")
 print(f"Output dir  : {out_dir}")
 
@@ -50,14 +55,14 @@ print(f"Output dir  : {out_dir}")
 # LOAD
 # ─────────────────────────────────────────────
 summary_files = sorted(glob.glob(
-    os.path.join(results_dir, f"*_contact_summary_{TAG}.csv")
+    os.path.join(results_dir, f"*_contact_summary_{TAG}{REGION_TAG}.csv")
 ))
 print(f"Found {len(summary_files)} summary files")
 
 if not summary_files:
     raise FileNotFoundError(
         f"No summary CSVs found in: {results_dir}\n"
-        f"Expected pattern: *_contact_summary_{TAG}.csv"
+        f"Expected pattern: *_contact_summary_{TAG}{REGION_TAG}.csv"
     )
 
 dfs      = [pd.read_csv(f) for f in summary_files]

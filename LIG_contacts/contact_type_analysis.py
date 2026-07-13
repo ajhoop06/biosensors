@@ -93,6 +93,14 @@ LIGAND_RESNAME  = "LIG"
 CUTOFF_NM       = 0.45     # 4.5 Å heavy-atom contact cutoff
 STRIDE          = 1        # set >1 only for quick debugging; use 1 for publication
 
+# LCA heavy-atom names for the C20-C24 pentanoic-acid tail (side chain off
+# the steroid D-ring, terminating in the carboxylate). Determined from
+# CONECT connectivity in ligand_pair3059.pdb: atom names/order are identical
+# across all sequences since it's the same ligand every time. Everything
+# else on LIG (the fused 4-ring core, 2 angular methyls, 3-OH oxygen) is
+# "core".
+LIGAND_TAIL_ATOMS = {"C44", "C45", "C48", "C50", "C60", "O41", "O42"}
+
 # ─────────────────────────────────────────────
 # RESIDUE CHEMISTRY MAP
 # ─────────────────────────────────────────────
@@ -122,6 +130,10 @@ def parse_args():
                         help="Start of analysis window in ns (default: 40)")
     parser.add_argument("--end-ns",   type=float, default=500.0,
                         help="End of analysis window in ns (default: 500)")
+    parser.add_argument("--ligand-region", choices=["whole", "core", "tail"], default="whole",
+                        help="Restrict ligand atoms to the steroid ring core, the "
+                             "C20-C24 carboxylate tail, or the whole ligand "
+                             "(default: whole)")
     return parser.parse_args()
 
 
@@ -156,7 +168,7 @@ def load_trajectory(seq_id, start_ps, end_ps):
 # ─────────────────────────────────────────────
 # CONTACT TYPE COMPUTATION
 # ─────────────────────────────────────────────
-def compute_contact_type_features(traj, seq_id):
+def compute_contact_type_features(traj, seq_id, ligand_region="whole"):
     """
     For each protein residue within CUTOFF_NM of LCA (any frame),
     compute per-frame binary contact and return:
@@ -165,18 +177,23 @@ def compute_contact_type_features(traj, seq_id):
     """
     top = traj.topology
 
-    # ── Ligand heavy atoms ──────────────────────────────────────────────
+    # ── Ligand heavy atoms, optionally restricted to core/tail ──────────
     lig_atoms = [
         a.index for a in top.atoms
         if a.residue.name == LIGAND_RESNAME and a.element.symbol != "H"
+        and (ligand_region == "whole"
+             or (ligand_region == "tail" and a.name in LIGAND_TAIL_ATOMS)
+             or (ligand_region == "core" and a.name not in LIGAND_TAIL_ATOMS))
     ]
     if not lig_atoms:
         raise ValueError(
-            f"[{seq_id}] No atoms found with residue name '{LIGAND_RESNAME}'. "
-            f"Check LIGAND_RESNAME. Available residue names: "
+            f"[{seq_id}] No atoms found with residue name '{LIGAND_RESNAME}' "
+            f"for ligand_region='{ligand_region}'. Check LIGAND_RESNAME / "
+            f"LIGAND_TAIL_ATOMS. Available residue names: "
             f"{sorted({r.name for r in top.residues})}"
         )
-    print(f"[{seq_id}] Ligand '{LIGAND_RESNAME}': {len(lig_atoms)} heavy atoms")
+    print(f"[{seq_id}] Ligand '{LIGAND_RESNAME}': {len(lig_atoms)} heavy atoms "
+          f"(region={ligand_region})")
 
     # ── Protein residues ─────────────────────────────────────────────────
     prot_residues = [
@@ -298,33 +315,38 @@ def main():
     start_ps = int(start_ns * 1000)
     end_ps   = int(end_ns   * 1000)
     TAG      = f"{int(start_ns)}_{int(end_ns)}ns"
+    ligand_region = args.ligand_region
+
+    # Region suffix keeps core/tail runs from overwriting the whole-ligand
+    # results; "whole" reproduces the original, unsuffixed path exactly.
+    REGION_TAG = "" if ligand_region == "whole" else f"_{ligand_region}"
 
     # Tagged output directory — one per time window, consistent with
     # water_contacts_{TAG}/ naming used by the water analysis pipeline
-    tagged_output_dir = os.path.join(output_base, f"contact_type_results_{TAG}")
+    tagged_output_dir = os.path.join(output_base, f"contact_type_results_{TAG}{REGION_TAG}")
     os.makedirs(tagged_output_dir, exist_ok=True)
 
     print(f"\n=== contact_type_analysis.py  |  seq_id={seq_id}  "
-          f"window={start_ns:.0f}–{end_ns:.0f} ns ===")
+          f"window={start_ns:.0f}–{end_ns:.0f} ns  region={ligand_region} ===")
 
     # Check if already done (safe to re-queue without reprocessing)
     summary_out = os.path.join(tagged_output_dir,
-                               f"{seq_id}_contact_summary_{TAG}.csv")
+                               f"{seq_id}_contact_summary_{TAG}{REGION_TAG}.csv")
     if os.path.exists(summary_out):
         print(f"[{seq_id}] Output already exists, skipping: {summary_out}")
         sys.exit(0)
 
     traj = load_trajectory(seq_id, start_ps, end_ps)
 
-    per_frame_df, residue_df = compute_contact_type_features(traj, seq_id)
+    per_frame_df, residue_df = compute_contact_type_features(traj, seq_id, ligand_region)
 
     print_diagnostics(per_frame_df, residue_df, seq_id)
 
     # ── Write outputs ─────────────────────────────────────────────────────
     per_frame_out = os.path.join(tagged_output_dir,
-                                 f"{seq_id}_contact_perframe_{TAG}.csv")
+                                 f"{seq_id}_contact_perframe_{TAG}{REGION_TAG}.csv")
     residue_out   = os.path.join(tagged_output_dir,
-                                 f"{seq_id}_residue_occupancy_{TAG}.csv")
+                                 f"{seq_id}_residue_occupancy_{TAG}{REGION_TAG}.csv")
 
     per_frame_df.to_csv(per_frame_out)
     residue_df.to_csv(residue_out, index=False)

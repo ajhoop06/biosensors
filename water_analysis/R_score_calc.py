@@ -60,9 +60,14 @@ parser.add_argument('--start-ns',  type=float, default=40.0,
                     help='Start of analysis window in ns (default: 40)')
 parser.add_argument('--end-ns',    type=float, default=500.0,
                     help='End of analysis window in ns (default: 500)')
+parser.add_argument('--ligand-region', choices=['whole', 'core', 'tail'], default='whole',
+                    help="Restrict ligand atoms to the steroid ring core, the "
+                         "C20-C24 carboxylate tail, or the whole ligand "
+                         "(default: whole)")
 args = parser.parse_args()
 seq_id   = args.seq_id
 seq_type = args.seq_type
+ligand_region = args.ligand_region
 
 # ── Analysis window ────────────────────────────────────────────────
 START_NS = args.start_ns
@@ -80,12 +85,24 @@ prod   = "prod_md_0p9_cutoff_3dt_64x1_16PME_642dd"
 
 traj_path = os.path.join(base, seq_type, seq_id, prod, "prod_md_500ns.xtc")
 top_path  = os.path.join(base, seq_type, seq_id, prod, "prod_md_500ns.gro")
-out_dir   = os.path.join(base, seq_type, seq_id, f"water_contacts_{TAG}")
+
+# Region suffix keeps core/tail runs from overwriting the whole-ligand
+# results; "whole" reproduces the original, unsuffixed path exactly.
+REGION_TAG = "" if ligand_region == "whole" else f"_{ligand_region}"
+out_dir    = os.path.join(base, seq_type, seq_id, f"water_contacts_{TAG}{REGION_TAG}")
 os.makedirs(out_dir, exist_ok=True)
 
 LIG_RESNAME    = "LIG"
 WATER_RESNAMES = {"HOH", "WAT", "SOL"}
 ION_RESNAMES   = {"NA", "CL", "NA+", "CL-"}
+
+# LCA heavy-atom names for the C20-C24 pentanoic-acid tail (side chain off
+# the steroid D-ring, terminating in the carboxylate). Determined from
+# CONECT connectivity in ligand_pair3059.pdb: atom names/order are identical
+# across all sequences since it's the same ligand every time. Everything
+# else on LIG (the fused 4-ring core, 2 angular methyls, 3-OH oxygen) is
+# "core".
+LIGAND_TAIL_ATOMS = {"C44", "C45", "C48", "C50", "C60", "O41", "O42"}
 
 HEAVY_CUT = 0.40   # nm (= 4.0 Å) — heavy-atom distance threshold
 R_DOM     = -0.70  # residues with R below this are "dominant" water-mediated
@@ -126,9 +143,19 @@ if not lig_res:
         f"No residue named '{LIG_RESNAME}' found in topology.\n"
         "Check LIG_RESNAME in the CONFIG block.")
 
-# Ligand heavy atoms
-lig_heavy = np.array(
-    _heavy([a.index for r in lig_res for a in r.atoms]), dtype=int)
+# Ligand heavy atoms, optionally restricted to the core or tail region
+lig_atoms_all = [a for r in lig_res for a in r.atoms]
+if ligand_region == "core":
+    lig_atoms_all = [a for a in lig_atoms_all if a.name not in LIGAND_TAIL_ATOMS]
+elif ligand_region == "tail":
+    lig_atoms_all = [a for a in lig_atoms_all if a.name in LIGAND_TAIL_ATOMS]
+
+lig_heavy = np.array(_heavy([a.index for a in lig_atoms_all]), dtype=int)
+
+if ligand_region != "whole" and len(lig_heavy) == 0:
+    raise ValueError(
+        f"ligand_region='{ligand_region}' matched no heavy atoms. "
+        "Check LIGAND_TAIL_ATOMS against this ligand's atom names.")
 
 # Water O atoms (parallel array to wat_H pairs — not needed here but kept
 # for consistency with downstream scripts)
@@ -147,7 +174,7 @@ for r in prot_res:
     if hv:
         prot_heavy_by_res[r.index] = np.array(hv, dtype=int)
 
-print(f"  Ligand  : {len(lig_heavy)} heavy atoms")
+print(f"  Ligand  : {len(lig_heavy)} heavy atoms  (region={ligand_region})")
 print(f"  Waters  : {len(wat_O)}")
 print(f"  Protein : {len(prot_heavy_by_res)} residues with heavy atoms")
 
@@ -231,7 +258,7 @@ df = pd.DataFrame(records)
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. SAVE CSV
 # ─────────────────────────────────────────────────────────────────────────────
-csv_path = os.path.join(out_dir, f"{seq_id}_R_scores_{TAG}.csv")
+csv_path = os.path.join(out_dir, f"{seq_id}_R_scores_{TAG}{REGION_TAG}.csv")
 df.to_csv(csv_path, index=False)
 print(f"R-score table saved → {csv_path}")
 
@@ -277,7 +304,7 @@ else:
     ax.set_ylabel('R-score', fontsize=10)
     ax.set_xlabel('Residue', fontsize=10)
     ax.set_ylim(-1.15, 1.15)
-    ax.set_title(f'{seq_id} — Water-mediated contact R-scores\n'
+    ax.set_title(f'{seq_id} — Water-mediated contact R-scores (ligand region: {ligand_region})\n'
                  f'(residues with I > 0.02,  n={len(df_plot)})',
                  fontsize=10)
     ax.legend(fontsize=8)
@@ -290,6 +317,6 @@ else:
                     ha='center', va='top', fontsize=6, rotation=90,
                     color='#8B0000')
 
-    png_path = os.path.join(out_dir, f"{seq_id}_R_scores_{TAG}.png")
+    png_path = os.path.join(out_dir, f"{seq_id}_R_scores_{TAG}{REGION_TAG}.png")
     fig.savefig(png_path, dpi=300)
     plt.show()
