@@ -157,7 +157,7 @@ nonb_013_nb	False Positive
 nonb_014_nb	False Positive
 nonb_017_nb	False Positive
 nonb_018_nb	False Positive
-#nonb_019_nb	False Positive	# omitted: prod_md_500ns.xtc corrupted ~225ns, resimulating
+nonb_019_nb	False Positive
 #nonb_020_nb	False Positive	# omitted: flipped ligand orientation in predicted pocket
 nonb_021_nb	False Positive
 nonb_022_nb	False Positive
