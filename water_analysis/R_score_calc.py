@@ -79,17 +79,20 @@ TAG      = f"{int(START_NS)}_{int(END_NS)}ns"   # e.g. "40_250ns", "40_500ns"
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG  ← edit these before running
 # ─────────────────────────────────────────────────────────────────────────────
-base   = "/scratch/alpine/ivta1597/LCA_boltz_models"
+# Trajectory inputs are read from the PetaLibrary archive, not scratch —
+# scratch auto-deletes after 90 days and older runs' xtc/gro are already gone.
+input_base  = "/pl/active/shirts_archive/IvanaTang/biosensors"
+output_base = "/scratch/alpine/ivta1597/LCA_boltz_models"
 ext    = "HMR/dodecahedron"
 prod   = "prod_md_0p9_cutoff_3dt_64x1_16PME_642dd"
 
-traj_path = os.path.join(base, seq_type, seq_id, prod, "prod_md_500ns.xtc")
-top_path  = os.path.join(base, seq_type, seq_id, prod, "prod_md_500ns.gro")
+traj_path = os.path.join(input_base, seq_type, seq_id, prod, "prod_md_500ns.xtc")
+top_path  = os.path.join(input_base, seq_type, seq_id, prod, "prod_md_500ns.gro")
 
 # Region suffix keeps core/tail runs from overwriting the whole-ligand
 # results; "whole" reproduces the original, unsuffixed path exactly.
 REGION_TAG = "" if ligand_region == "whole" else f"_{ligand_region}"
-out_dir    = os.path.join(base, seq_type, seq_id, f"water_contacts_{TAG}{REGION_TAG}")
+out_dir    = os.path.join(output_base, seq_type, seq_id, f"water_contacts_{TAG}{REGION_TAG}")
 os.makedirs(out_dir, exist_ok=True)
 
 LIG_RESNAME    = "LIG"

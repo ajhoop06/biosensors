@@ -26,7 +26,10 @@ import mdtraj as md
 # ─────────────────────────────────────────────
 # PATHS  — edit these for your environment
 # ─────────────────────────────────────────────
-base    = "/scratch/alpine/ivta1597/LCA_boltz_models"   # trajectory data only
+# Trajectory inputs are read from the PetaLibrary archive, not scratch —
+# scratch auto-deletes after 90 days and older runs' xtc/gro are already gone.
+# Layout mirrors scratch's LCA_boltz_models: binders/nonbinders/neg_low_pkt/neg_fail_gate.
+base    = "/pl/active/shirts_archive/IvanaTang/biosensors"
 runrel  = "prod_md_0p9_cutoff_3dt_64x1_16PME_642dd"
 
 # Results are written to the persistent repo location (not scratch), so
