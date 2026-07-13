@@ -50,9 +50,10 @@ BASE = "/scratch/alpine/ivta1597/LCA_boltz_models"
 # ---------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--seq_list', default=None,
+    parser.add_argument('--seq_list', default="/projects/ivta1597/biosensors/seq_ids_orig.txt",
                         help='Text file with seq_id, seq_type, and optional '
-                             'custom base path, one per line')
+                             'custom base path, one per line '
+                             '(default: seq_ids_orig.txt in the repo root)')
     parser.add_argument('--seq_ids',   nargs='+', default=None)
     parser.add_argument('--seq_types', nargs='+', default=None)
     parser.add_argument('--out_dir', required=True)
@@ -73,6 +74,9 @@ def load_seq_list(args):
     custom_dir is the full path to the water_contacts directory, or None
     to use the default path construction.
     """
+    if args.seq_ids:
+        types = args.seq_types or ['Unknown'] * len(args.seq_ids)
+        return [(sid, stype, None) for sid, stype in zip(args.seq_ids, types)]
     if args.seq_list:
         entries = []
         with open(args.seq_list) as f:
@@ -86,9 +90,6 @@ def load_seq_list(args):
                 custom   = parts[2] if len(parts) > 2 else None
                 entries.append((seq_id, seq_type, custom))
         return entries
-    if args.seq_ids:
-        types = args.seq_types or ['Unknown'] * len(args.seq_ids)
-        return [(sid, stype, None) for sid, stype in zip(args.seq_ids, types)]
     raise ValueError("Provide either --seq_list or --seq_ids")
 
 

@@ -19,7 +19,8 @@
 #   sbatch get_agg_r_scores.sh [seq_list] [start_ns] [end_ns]
 #
 # Arguments:
-#   seq_list - path to seq_ids.txt-style sequence list (default: seq_ids.txt)
+#   seq_list - path to seq_ids.txt-style sequence list
+#              (default: seq_ids_orig.txt in the repo root)
 #   start_ns - start of analysis window in ns (default: 40)
 #   end_ns   - end of analysis window in ns   (default: 500)
 #
@@ -36,7 +37,7 @@
 
 set -euo pipefail
 
-SEQ_LIST=${1:-seq_ids.txt}
+SEQ_LIST=${1:-/projects/ivta1597/biosensors/seq_ids_orig.txt}
 START_NS=${2:-40}
 END_NS=${3:-500}
 
