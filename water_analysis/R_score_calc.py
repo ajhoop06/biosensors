@@ -99,13 +99,23 @@ LIG_RESNAME    = "LIG"
 WATER_RESNAMES = {"HOH", "WAT", "SOL"}
 ION_RESNAMES   = {"NA", "CL", "NA+", "CL-"}
 
-# LCA heavy-atom names for the C20-C24 pentanoic-acid tail (side chain off
-# the steroid D-ring, terminating in the carboxylate). Determined from
-# CONECT connectivity in ligand_pair3059.pdb: atom names/order are identical
-# across all sequences since it's the same ligand every time. Everything
-# else on LIG (the fused 4-ring core, 2 angular methyls, 3-OH oxygen) is
-# "core".
-LIGAND_TAIL_ATOMS = {"C44", "C45", "C48", "C50", "C60", "O41", "O42"}
+# LCA heavy-atom split between the C20-C24 pentanoic-acid tail (side chain
+# off the steroid D-ring, terminating in the carboxylate) and everything
+# else (the fused 4-ring core, 2 angular methyls, 3-OH oxygen).
+#
+# This is expressed as 0-indexed ORDINAL POSITIONS among the ligand's heavy
+# atoms in topology order, not atom names: the production .itp/.gro use
+# generic per-element names ("O", "O", "O", "C", "C", ...), not the unique
+# names ("O41", "C44", ...) from the standalone ligand_pairXXXX.pdb used to
+# derive this split, so name-based matching silently selects zero (or all)
+# atoms. Atom ORDER is preserved between the two, though: heavy atoms 0-2
+# are the 3 oxygens (O41,O42,O43) and 3-26 are the 24 carbons (C44-C67), in
+# that order, on every sequence (same ligand, same parameterization
+# pipeline). LIGAND_EXPECTED_ELEMENTS is checked at runtime so a future
+# sequence that breaks this assumption fails loudly instead of silently
+# mis-splitting.
+LIGAND_TAIL_ORDINALS     = {0, 1, 3, 4, 7, 9, 19}   # O41,O42,C44,C45,C48,C50,C60
+LIGAND_EXPECTED_ELEMENTS = ['O', 'O', 'O'] + ['C'] * 24
 
 HEAVY_CUT = 0.40   # nm (= 4.0 Å) — heavy-atom distance threshold
 R_DOM     = -0.70  # residues with R below this are "dominant" water-mediated
@@ -146,19 +156,25 @@ if not lig_res:
         f"No residue named '{LIG_RESNAME}' found in topology.\n"
         "Check LIG_RESNAME in the CONFIG block.")
 
-# Ligand heavy atoms, optionally restricted to the core or tail region
-lig_atoms_all = [a for r in lig_res for a in r.atoms]
-if ligand_region == "core":
-    lig_atoms_all = [a for a in lig_atoms_all if a.name not in LIGAND_TAIL_ATOMS]
-elif ligand_region == "tail":
-    lig_atoms_all = [a for a in lig_atoms_all if a.name in LIGAND_TAIL_ATOMS]
+# Ligand heavy atoms, in topology order, optionally restricted to the
+# core or tail region by ordinal position (see LIGAND_TAIL_ORDINALS above).
+lig_heavy_atoms_all = [a for r in lig_res for a in r.atoms if a.element.symbol != 'H']
 
-lig_heavy = np.array(_heavy([a.index for a in lig_atoms_all]), dtype=int)
+if ligand_region != "whole":
+    got_elements = [a.element.symbol for a in lig_heavy_atoms_all]
+    if got_elements != LIGAND_EXPECTED_ELEMENTS:
+        raise ValueError(
+            f"Ligand heavy-atom element order doesn't match the expected "
+            f"LCA pattern (3xO then 24xC) that LIGAND_TAIL_ORDINALS was "
+            f"derived from. Got: {got_elements}")
+    if ligand_region == "core":
+        lig_heavy_atoms_all = [a for i, a in enumerate(lig_heavy_atoms_all)
+                                if i not in LIGAND_TAIL_ORDINALS]
+    elif ligand_region == "tail":
+        lig_heavy_atoms_all = [a for i, a in enumerate(lig_heavy_atoms_all)
+                                if i in LIGAND_TAIL_ORDINALS]
 
-if ligand_region != "whole" and len(lig_heavy) == 0:
-    raise ValueError(
-        f"ligand_region='{ligand_region}' matched no heavy atoms. "
-        "Check LIGAND_TAIL_ATOMS against this ligand's atom names.")
+lig_heavy = np.array([a.index for a in lig_heavy_atoms_all], dtype=int)
 
 # Water O atoms (parallel array to wat_H pairs — not needed here but kept
 # for consistency with downstream scripts)

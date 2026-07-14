@@ -96,13 +96,23 @@ LIGAND_RESNAME  = "LIG"
 CUTOFF_NM       = 0.45     # 4.5 Å heavy-atom contact cutoff
 STRIDE          = 1        # set >1 only for quick debugging; use 1 for publication
 
-# LCA heavy-atom names for the C20-C24 pentanoic-acid tail (side chain off
-# the steroid D-ring, terminating in the carboxylate). Determined from
-# CONECT connectivity in ligand_pair3059.pdb: atom names/order are identical
-# across all sequences since it's the same ligand every time. Everything
-# else on LIG (the fused 4-ring core, 2 angular methyls, 3-OH oxygen) is
-# "core".
-LIGAND_TAIL_ATOMS = {"C44", "C45", "C48", "C50", "C60", "O41", "O42"}
+# LCA heavy-atom split between the C20-C24 pentanoic-acid tail (side chain
+# off the steroid D-ring, terminating in the carboxylate) and everything
+# else (the fused 4-ring core, 2 angular methyls, 3-OH oxygen).
+#
+# This is expressed as 0-indexed ORDINAL POSITIONS among the ligand's heavy
+# atoms in topology order, not atom names: the production .itp/.gro use
+# generic per-element names ("O", "O", "O", "C", "C", ...), not the unique
+# names ("O41", "C44", ...) from the standalone ligand_pairXXXX.pdb used to
+# derive this split, so name-based matching silently selects zero (or all)
+# atoms. Atom ORDER is preserved between the two, though: heavy atoms 0-2
+# are the 3 oxygens (O41,O42,O43) and 3-26 are the 24 carbons (C44-C67), in
+# that order, on every sequence (same ligand, same parameterization
+# pipeline). LIGAND_EXPECTED_ELEMENTS is checked at runtime so a future
+# sequence that breaks this assumption fails loudly instead of silently
+# mis-splitting.
+LIGAND_TAIL_ORDINALS     = {0, 1, 3, 4, 7, 9, 19}   # O41,O42,C44,C45,C48,C50,C60
+LIGAND_EXPECTED_ELEMENTS = ['O', 'O', 'O'] + ['C'] * 24
 
 # ─────────────────────────────────────────────
 # RESIDUE CHEMISTRY MAP
@@ -180,21 +190,35 @@ def compute_contact_type_features(traj, seq_id, ligand_region="whole"):
     """
     top = traj.topology
 
-    # ── Ligand heavy atoms, optionally restricted to core/tail ──────────
-    lig_atoms = [
-        a.index for a in top.atoms
+    # ── Ligand heavy atoms, in topology order, optionally restricted to
+    # core/tail by ordinal position (see LIGAND_TAIL_ORDINALS above) ────────
+    lig_heavy_atoms_all = [
+        a for a in top.atoms
         if a.residue.name == LIGAND_RESNAME and a.element.symbol != "H"
-        and (ligand_region == "whole"
-             or (ligand_region == "tail" and a.name in LIGAND_TAIL_ATOMS)
-             or (ligand_region == "core" and a.name not in LIGAND_TAIL_ATOMS))
     ]
-    if not lig_atoms:
+    if not lig_heavy_atoms_all:
         raise ValueError(
-            f"[{seq_id}] No atoms found with residue name '{LIGAND_RESNAME}' "
-            f"for ligand_region='{ligand_region}'. Check LIGAND_RESNAME / "
-            f"LIGAND_TAIL_ATOMS. Available residue names: "
+            f"[{seq_id}] No atoms found with residue name '{LIGAND_RESNAME}'. "
+            f"Check LIGAND_RESNAME. Available residue names: "
             f"{sorted({r.name for r in top.residues})}"
         )
+
+    if ligand_region != "whole":
+        got_elements = [a.element.symbol for a in lig_heavy_atoms_all]
+        if got_elements != LIGAND_EXPECTED_ELEMENTS:
+            raise ValueError(
+                f"[{seq_id}] Ligand heavy-atom element order doesn't match "
+                f"the expected LCA pattern (3xO then 24xC) that "
+                f"LIGAND_TAIL_ORDINALS was derived from. Got: {got_elements}"
+            )
+        if ligand_region == "core":
+            lig_heavy_atoms_all = [a for i, a in enumerate(lig_heavy_atoms_all)
+                                    if i not in LIGAND_TAIL_ORDINALS]
+        elif ligand_region == "tail":
+            lig_heavy_atoms_all = [a for i, a in enumerate(lig_heavy_atoms_all)
+                                    if i in LIGAND_TAIL_ORDINALS]
+
+    lig_atoms = [a.index for a in lig_heavy_atoms_all]
     print(f"[{seq_id}] Ligand '{LIGAND_RESNAME}': {len(lig_atoms)} heavy atoms "
           f"(region={ligand_region})")
 
