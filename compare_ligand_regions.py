@@ -100,6 +100,37 @@ def load_contact_features(contact_dir, tag, seq_type_map):
     return out
 
 
+# md_candidate_guide.csv's md_group values use different suffixes than the
+# seq_id naming convention (pair_XXXX_binder / _nb / _low_pkt / _fail_gate)
+# used everywhere else in the repo.
+MD_GROUP_SUFFIX = {
+    "binder": "binder",
+    "non_binder": "nb",
+    "negative_low_pocket": "low_pkt",
+    "negative_fail_gate": "fail_gate",
+}
+
+
+def load_ngs_observed_ids(structure_source_path):
+    """seq_ids from md_candidate_guide.csv where source == ngs_observed, i.e.
+    sequencing-confirmed (Y2H/FACS sort-seq) rather than designed-and-assumed."""
+    guide = pd.read_csv(structure_source_path)
+    confirmed = guide[guide["source"] == "ngs_observed"].copy()
+    confirmed["seq_id"] = confirmed.apply(
+        lambda r: f"{r['pair_id']}_{MD_GROUP_SUFFIX.get(r['md_group'], r['md_group'])}",
+        axis=1)
+    return set(confirmed["seq_id"])
+
+
+def filter_to_ngs_observed(data, ngs_ids, label):
+    for region, df in data.items():
+        before = len(df)
+        data[region] = df[df["seq_id"].isin(ngs_ids)].reset_index(drop=True)
+        print(f"  {label} {region}: {before} -> {len(data[region])} sequences "
+              f"(sequencing-confirmed only)")
+    return data
+
+
 def resid_columns(df):
     return sorted((c for c in df.columns if c.startswith("R_")),
                   key=lambda c: int(c.split("_")[1]))
@@ -377,6 +408,9 @@ def main():
     parser.add_argument("--top-n", type=int, default=6,
                         help="Number of most core/tail-divergent residues to plot individually "
                              "(default: 6, i.e. top 6 + bottom 6 by delta)")
+    parser.add_argument("--structure-source", default=None,
+                        help="Path to md_candidate_guide.csv. If given, restricts the analysis "
+                             "to sequencing-confirmed sequences only (source == ngs_observed).")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -397,6 +431,13 @@ def main():
             "No R-score or contact-feature CSVs found. Check --r-scores-dir / "
             "--contact-dir / --tag."
         )
+
+    if args.structure_source:
+        ngs_ids = load_ngs_observed_ids(args.structure_source)
+        print(f"\nRestricting to sequencing-confirmed (source == ngs_observed) "
+              f"sequences: {len(ngs_ids)} in {args.structure_source}")
+        r_data = filter_to_ngs_observed(r_data, ngs_ids, "R-scores")
+        contact_data = filter_to_ngs_observed(contact_data, ngs_ids, "Contact feats")
 
     print("\n" + "=" * 70)
     print("R-SCORE: core vs tail per-residue comparison")

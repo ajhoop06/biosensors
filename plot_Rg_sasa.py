@@ -3,6 +3,7 @@ plot_Rg_sasa.py — Plot per-group Rg and SASA distributions from GROMACS xvg ou
 
 Usage:
     python plot_Rg_sasa.py [--region pocket|whole] [seq_ids.txt] [--out-dir DIR]
+                            [--structure-source md_candidate_guide.csv]
 
 Reads Rg_{suffix}.xvg and sasa_{suffix}.xvg from each sequence's run directory,
 computes the per-trajectory mean, and saves two comparison plots.
@@ -11,6 +12,7 @@ computes the per-trajectory mean, and saves two comparison plots.
 import argparse
 import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
@@ -61,6 +63,28 @@ def read_seq_ids(path):
             custom_base = parts[2] if len(parts) > 2 else ""
             seqs.append((folder_name, label, custom_base))
     return seqs
+
+
+# md_candidate_guide.csv's md_group values use different suffixes than the
+# seq_id naming convention (pair_XXXX_binder / _nb / _low_pkt / _fail_gate)
+# used everywhere else in the repo.
+MD_GROUP_SUFFIX = {
+    "binder": "binder",
+    "non_binder": "nb",
+    "negative_low_pocket": "low_pkt",
+    "negative_fail_gate": "fail_gate",
+}
+
+
+def load_ngs_observed_ids(structure_source_path):
+    """seq_ids from md_candidate_guide.csv where source == ngs_observed, i.e.
+    sequencing-confirmed (Y2H/FACS sort-seq) rather than designed-and-assumed."""
+    guide = pd.read_csv(structure_source_path)
+    confirmed = guide[guide["source"] == "ngs_observed"].copy()
+    confirmed["seq_id"] = confirmed.apply(
+        lambda r: f"{r['pair_id']}_{MD_GROUP_SUFFIX.get(r['md_group'], r['md_group'])}",
+        axis=1)
+    return set(confirmed["seq_id"])
 
 
 def get_rundir(folder_name, label, custom_base):
@@ -145,6 +169,11 @@ def main():
     parser.add_argument(
         "--out-dir", default=".", help="Directory for output PNGs (default: .)"
     )
+    parser.add_argument(
+        "--structure-source", default=None,
+        help="Path to md_candidate_guide.csv. If given, restricts the analysis to "
+             "sequencing-confirmed sequences only (source == ngs_observed).",
+    )
     args = parser.parse_args()
 
     suffix = "pocket" if args.region == "pocket" else "PL"
@@ -152,6 +181,13 @@ def main():
 
     seqs = read_seq_ids(args.seq_ids)
     print(f"Loaded {len(seqs)} sequences from {args.seq_ids}  |  region: {args.region}")
+
+    if args.structure_source:
+        ngs_ids = load_ngs_observed_ids(args.structure_source)
+        before = len(seqs)
+        seqs = [s for s in seqs if s[0] in ngs_ids]
+        print(f"Restricting to sequencing-confirmed (source == ngs_observed) sequences: "
+              f"{before} -> {len(seqs)}")
 
     rg_data = collect_means(seqs, f"Rg_{suffix}.xvg")
     sasa_data = collect_means(seqs, f"sasa_{suffix}.xvg")

@@ -15,6 +15,7 @@ Output: pocket_volume_features.csv
 
 Usage:
     python extract_pocket_features.py [seq_ids.txt] [--threshold 800] [--plot]
+                                       [--structure-source md_candidate_guide.csv]
 """
 
 import os
@@ -46,6 +47,28 @@ def get_dir_type(seq_type):
     return mapping.get(seq_type, seq_type)
 
 
+# md_candidate_guide.csv's md_group values use different suffixes than the
+# seq_id naming convention (pair_XXXX_binder / _nb / _low_pkt / _fail_gate)
+# used everywhere else in the repo.
+MD_GROUP_SUFFIX = {
+    "binder": "binder",
+    "non_binder": "nb",
+    "negative_low_pocket": "low_pkt",
+    "negative_fail_gate": "fail_gate",
+}
+
+
+def load_ngs_observed_ids(structure_source_path):
+    """seq_ids from md_candidate_guide.csv where source == ngs_observed, i.e.
+    sequencing-confirmed (Y2H/FACS sort-seq) rather than designed-and-assumed."""
+    guide = pd.read_csv(structure_source_path)
+    confirmed = guide[guide["source"] == "ngs_observed"].copy()
+    confirmed["seq_id"] = confirmed.apply(
+        lambda r: f"{r['pair_id']}_{MD_GROUP_SUFFIX.get(r['md_group'], r['md_group'])}",
+        axis=1)
+    return set(confirmed["seq_id"])
+
+
 def load_descriptors(desc_path):
     """Load mdpocket descriptors file and return DataFrame."""
     df = pd.read_csv(desc_path, sep=r'\s+')
@@ -75,14 +98,23 @@ def main():
                         help="Generate summary plots")
     parser.add_argument("--output",    default="pocket_volume_features.csv",
                         help="Output CSV filename (default: pocket_volume_features.csv)")
+    parser.add_argument("--structure-source", default=None,
+                        help="Path to md_candidate_guide.csv. If given, restricts the analysis "
+                             "to sequencing-confirmed sequences only (source == ngs_observed).")
     args = parser.parse_args()
 
     if not os.path.exists(args.seq_list):
         print(f"ERROR: seq list not found: {args.seq_list}")
         sys.exit(1)
 
+    ngs_ids = load_ngs_observed_ids(args.structure_source) if args.structure_source else None
+    if ngs_ids is not None:
+        print(f"Restricting to sequencing-confirmed (source == ngs_observed) sequences: "
+              f"{len(ngs_ids)} in {args.structure_source}")
+
     records  = []
     missing  = []
+    skipped_unconfirmed = []
 
     with open(args.seq_list) as f:
         for line in f:
@@ -94,6 +126,10 @@ def main():
             seq_id      = parts[0].strip()
             seq_type    = parts[1].strip() if len(parts) > 1 else ""
             custom_path = parts[2].strip() if len(parts) > 2 else ""
+
+            if ngs_ids is not None and seq_id not in ngs_ids:
+                skipped_unconfirmed.append(seq_id)
+                continue
 
             if custom_path:
                 run_dir = os.path.join(custom_path, RUNREL)
@@ -138,6 +174,8 @@ def main():
     print(f"  Sequences missing   : {len(missing)}")
     if missing:
         print(f"  Missing seq_ids     : {', '.join(missing)}")
+    if ngs_ids is not None:
+        print(f"  Skipped (not sequencing-confirmed) : {len(skipped_unconfirmed)}")
 
     # ── Plots ─────────────────────────────────────────────────────────────────
     if args.plot:

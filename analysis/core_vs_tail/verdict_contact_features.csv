@@ -1,0 +1,3 @@
+region,n_features_tested,n_features_significant,top_feature,top_feature_p,top_feature_d
+core,6,4,mean_frac_hydrophobic,0.0009034039012424972,0.5918797455420634
+tail,6,3,mean_n_neg_charged,2.792711164970321e-06,0.3805852028532393

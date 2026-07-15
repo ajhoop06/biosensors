@@ -1,0 +1,3 @@
+region,n_features_tested,n_features_significant,top_feature,top_feature_p,top_feature_d
+core,6,4,mean_n_total,1.6070323831116157e-06,-0.9889309836195802
+tail,6,2,mean_n_pos_charged,0.005188410794471038,-0.6022125721989349
