@@ -13,7 +13,7 @@ Outputs a selected_pocket.pdb per sequence for use in mdpocket characterization:
              -o mdpocket_<seq_id>
 
 Usage:
-    python select_binding_pocket.py [seq_ids.txt] [--cutoff 8.0] [--ligand_resname LIG]
+    python select_binding_pocket.py [seq_ids_orig.txt] [--cutoff 8.0] [--ligand_resname LIG]
 """
 
 import os
@@ -22,7 +22,14 @@ import argparse
 import numpy as np
 
 # ── Configurable paths ────────────────────────────────────────────────────────
-BASE   = "/scratch/alpine/ivta1597/LCA_boltz_models"
+# medoid_PL.pdb is read from the PetaLibrary archive, not scratch -- scratch
+# auto-deletes after 90 days and older runs' copies are already gone. The
+# freq_iso PDB (mdpocket exploration output) and selected_pocket.pdb (this
+# script's own output) are pipeline artifacts that only ever live on scratch.
+# Mirrors the same fix already applied to water_analysis/R_score_calc.py and
+# LIG_contacts/contact_type_analysis.py.
+ARCHIVE_BASE = "/pl/active/shirts_archive/IvanaTang/biosensors"
+BASE         = "/scratch/alpine/ivta1597/LCA_boltz_models"
 RUNREL = "prod_md_0p9_cutoff_3dt_64x1_16PME_642dd"
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -35,6 +42,15 @@ def get_dir_type(seq_type):
         "Fail Geometry":  "neg_fail_gate",
     }
     return mapping.get(seq_type, seq_type)
+
+
+def resolve_archive_dir(flat_dir):
+    """Newer pipeline runs write medoid_PL.pdb under runrel/500ns/, older ones
+    write directly into runrel/. Mirrors contact_type_analysis.py's run_dir()."""
+    nested_dir = os.path.join(flat_dir, "500ns")
+    if os.path.exists(os.path.join(nested_dir, "medoid_PL.pdb")):
+        return nested_dir
+    return flat_dir
 
 
 def parse_pdb_atoms(pdb_path, record_types=("ATOM", "HETATM")):
@@ -75,16 +91,19 @@ def get_ligand_coords(pdb_path, ligand_resname):
     return np.array(coords)
 
 
-def process_sequence(seq_id, run_dir, cutoff, ligand_resname):
+def process_sequence(seq_id, archive_dir, run_dir, cutoff, ligand_resname):
     """Run pocket selection for a single sequence. Returns 'ok', 'skip', or 'fail'."""
 
-    pl_pdb   = os.path.join(run_dir, "medoid_PL.pdb")
+    pl_pdb   = os.path.join(archive_dir, "medoid_PL.pdb")
     freq_pdb = os.path.join(run_dir, f"mdpocket_{seq_id}_freq_iso_0_5.pdb")
     out_pdb  = os.path.join(run_dir, "selected_pocket.pdb")
 
     # ── Validate inputs ───────────────────────────────────────────────────────
+    if not os.path.isdir(archive_dir):
+        print(f"  SKIP: archive directory not found: {archive_dir}")
+        return "skip"
     if not os.path.isdir(run_dir):
-        print(f"  SKIP: run directory not found: {run_dir}")
+        print(f"  SKIP: scratch run directory not found: {run_dir}")
         return "skip"
 
     for path, label in [(pl_pdb, "medoid_PL.pdb"), (freq_pdb, "freq_iso PDB")]:
@@ -144,8 +163,9 @@ def process_sequence(seq_id, run_dir, cutoff, ligand_resname):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("seq_list",        nargs="?", default="seq_ids.txt",
-                        help="Tab-separated seq_ids file (default: seq_ids.txt)")
+    parser.add_argument("seq_list",        nargs="?",
+                        default="/projects/ivta1597/biosensors/seq_ids_orig.txt",
+                        help="Tab-separated seq_ids file (default: seq_ids_orig.txt)")
     parser.add_argument("--cutoff",        type=float, default=8.0,
                         help="Distance cutoff in Å from ligand centroid (default: 8.0)")
     parser.add_argument("--ligand_resname",default="LIG",
@@ -172,11 +192,15 @@ def main():
             print(f"\n{seq_id}  [{seq_type}]")
 
             if custom_path:
-                run_dir = os.path.join(custom_path, RUNREL)
+                archive_dir = resolve_archive_dir(os.path.join(custom_path, RUNREL))
+                run_dir     = os.path.join(custom_path, RUNREL)
             else:
-                run_dir = os.path.join(BASE, get_dir_type(seq_type), seq_id, RUNREL)
+                dir_type    = get_dir_type(seq_type)
+                archive_dir = resolve_archive_dir(
+                    os.path.join(ARCHIVE_BASE, dir_type, seq_id, RUNREL))
+                run_dir     = os.path.join(BASE, dir_type, seq_id, RUNREL)
 
-            result = process_sequence(seq_id, run_dir, args.cutoff, args.ligand_resname)
+            result = process_sequence(seq_id, archive_dir, run_dir, args.cutoff, args.ligand_resname)
             counts[result] += 1
 
     print(f"\n{'='*35}")

@@ -6,10 +6,10 @@
 # mdpocket characterization using the selected_pocket.pdb from exploration.
 #
 # Usage:
-#   bash submit_mdpocket_char.sh [seq_ids.txt]
+#   bash submit_mdpocket_char.sh [seq_ids_orig.txt]
 # =============================================================================
 
-SEQ_LIST=${1:-seq_ids.txt}
+SEQ_LIST=${1:-/projects/ivta1597/biosensors/seq_ids_orig.txt}
 
 if [ ! -f "$SEQ_LIST" ]; then
     echo "ERROR: seq list file not found: $SEQ_LIST"

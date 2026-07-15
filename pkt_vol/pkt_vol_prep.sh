@@ -6,16 +6,23 @@
 #   1) Strip ligand    → protein_only.xtc
 #   2) Extract ref PDB → protein_only.pdb
 #
+# Reads the raw MD topology/trajectory (TPR, PL_only_40_500ns.xtc) from the
+# PetaLibrary archive, not scratch -- scratch auto-deletes after 90 days and
+# older runs' inputs are already gone. Outputs (protein_only.*) are still
+# written to scratch, same as before. Mirrors the same fix already applied to
+# water_analysis/R_score_calc.py and LIG_contacts/contact_type_analysis.py.
+#
 # After this script completes, run mdpocket exploration manually per sequence:
 #   mdpocket --trajectory_file protein_only.xtc --trajectory_format xtc \
 #            -f protein_only.pdb -o mdpocket_<seq_id>
 #
 # Usage:
-#   bash run_pocket_pipeline_manual.sh [seq_ids.txt]
+#   bash run_pocket_pipeline_manual.sh [seq_ids_orig.txt]
 # =============================================================================
 
 # ── Configurable paths ────────────────────────────────────────────────────────
-BASE="/scratch/alpine/ivta1597/LCA_boltz_models"
+INPUT_BASE="/pl/active/shirts_archive/IvanaTang/biosensors"   # raw TPR/trajectory (archive)
+OUTPUT_BASE="/scratch/alpine/ivta1597/LCA_boltz_models"       # pipeline outputs (scratch)
 RUNREL="prod_md_0p9_cutoff_3dt_64x1_16PME_642dd"
 GMX="/projects/ivta1597/pkgs/gromacs-2025.3/bin/gmx"
 REF_TPR="prod_md_500ns.tpr"
@@ -25,7 +32,7 @@ PROT_PDB="protein_only.pdb"
 PROT_GROUP="Protein"
 # ─────────────────────────────────────────────────────────────────────────────
 
-SEQ_LIST=${1:-seq_ids.txt}
+SEQ_LIST=${1:-/projects/ivta1597/biosensors/seq_ids_orig.txt}
 
 if [ ! -f "$SEQ_LIST" ]; then
     echo "ERROR: seq list file not found: $SEQ_LIST"
@@ -42,6 +49,20 @@ get_dir_type() {
     esac
 }
 
+# Newer pipeline runs write the trajectory/topology under runrel/500ns/,
+# older ones write directly into runrel/ -- mirrors contact_type_analysis.py's
+# run_dir() detection logic (keyed on medoid_PL.pdb, which moved along with
+# the trajectory files during the reorg).
+resolve_input_dir() {
+    local flat_dir="$1"
+    local nested_dir="${flat_dir}/500ns"
+    if [[ -f "${nested_dir}/medoid_PL.pdb" ]]; then
+        echo "$nested_dir"
+    else
+        echo "$flat_dir"
+    fi
+}
+
 total=0; failed=0
 
 while IFS=$'\t' read -r seq_id seq_type custom_path || [[ -n "$seq_id" ]]; do
@@ -50,16 +71,18 @@ while IFS=$'\t' read -r seq_id seq_type custom_path || [[ -n "$seq_id" ]]; do
     ((total++))
 
     if [[ -n "$custom_path" ]]; then
-        RUN_DIR="${custom_path}/${RUNREL}"
+        IN_RUN_DIR=$(resolve_input_dir "${custom_path}/${RUNREL}")
+        OUT_RUN_DIR="${custom_path}/${RUNREL}"
     else
         dir_type=$(get_dir_type "$seq_type")
-        RUN_DIR="${BASE}/${dir_type}/${seq_id}/${RUNREL}"
+        IN_RUN_DIR=$(resolve_input_dir "${INPUT_BASE}/${dir_type}/${seq_id}/${RUNREL}")
+        OUT_RUN_DIR="${OUTPUT_BASE}/${dir_type}/${seq_id}/${RUNREL}"
     fi
 
-    TPR="${RUN_DIR}/${REF_TPR}"
-    IN_XTC="${RUN_DIR}/${PL_XTC}"
-    PROT_XTC_PATH="${RUN_DIR}/${PROT_XTC}"
-    PROT_PDB_PATH="${RUN_DIR}/${PROT_PDB}"
+    TPR="${IN_RUN_DIR}/${REF_TPR}"
+    IN_XTC="${IN_RUN_DIR}/${PL_XTC}"
+    PROT_XTC_PATH="${OUT_RUN_DIR}/${PROT_XTC}"
+    PROT_PDB_PATH="${OUT_RUN_DIR}/${PROT_PDB}"
 
     echo ""
     echo "========================================"
@@ -68,10 +91,12 @@ while IFS=$'\t' read -r seq_id seq_type custom_path || [[ -n "$seq_id" ]]; do
 
     # ── Validate inputs ───────────────────────────────────────────────────────
     abort=0
-    [[ ! -d "$RUN_DIR" ]] && echo "ERROR: run directory not found: $RUN_DIR" && abort=1
+    [[ ! -d "$IN_RUN_DIR" ]] && echo "ERROR: archive input directory not found: $IN_RUN_DIR" && abort=1
     [[ ! -f "$TPR"     ]] && echo "ERROR: TPR not found: $TPR"               && abort=1
     [[ ! -f "$IN_XTC"  ]] && echo "ERROR: PL trajectory not found: $IN_XTC"  && abort=1
     if [[ $abort -eq 1 ]]; then ((failed++)); continue; fi
+
+    mkdir -p "$OUT_RUN_DIR"
 
     # ── Step 1: strip ligand ──────────────────────────────────────────────────
     echo ""

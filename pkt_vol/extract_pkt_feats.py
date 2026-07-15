@@ -14,7 +14,7 @@ Features extracted per sequence:
 Output: pocket_volume_features.csv
 
 Usage:
-    python extract_pocket_features.py [seq_ids.txt] [--threshold 800] [--plot]
+    python extract_pocket_features.py [seq_ids_orig.txt] [--threshold 800] [--plot]
                                        [--structure-source md_candidate_guide.csv]
 """
 
@@ -91,7 +91,8 @@ def extract_features(df, threshold):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("seq_list",   nargs="?", default="seq_ids.txt")
+    parser.add_argument("seq_list",   nargs="?",
+                        default="/projects/ivta1597/biosensors/seq_ids_orig.txt")
     parser.add_argument("--threshold", type=float, default=800.0,
                         help="Volume threshold for closed_frac calculation in Å³ (default: 800)")
     parser.add_argument("--plot",      action="store_true",
