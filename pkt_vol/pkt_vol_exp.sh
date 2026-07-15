@@ -67,10 +67,15 @@ if [[ ! -f "${RUN_DIR}/${PROT_PDB}" ]]; then
     echo "ERROR: protein_only.pdb not found in $RUN_DIR"; exit 1
 fi
 
-# ── Skip if already done ──────────────────────────────────────────────────────
-if [[ -f "$FREQ_ISO" ]]; then
-    echo "SKIP: freq_iso_0_5.pdb already exists"
+# ── Skip if already done (and non-empty) ───────────────────────────────────────
+# Existence alone isn't a reliable "done" signal -- an interrupted job (or a
+# past bug) can leave a 0-atom freq_iso file behind, which would otherwise be
+# skipped forever. Require at least one ATOM/HETATM record too.
+if [[ -f "$FREQ_ISO" ]] && grep -qE '^(ATOM|HETATM)' "$FREQ_ISO"; then
+    echo "SKIP: freq_iso_0_5.pdb already exists and has pocket atoms"
     exit 0
+elif [[ -f "$FREQ_ISO" ]]; then
+    echo "RERUN: freq_iso_0_5.pdb exists but has no ATOM/HETATM records -- regenerating"
 fi
 
 # ── Run mdpocket exploration ──────────────────────────────────────────────────
@@ -88,7 +93,13 @@ EXIT_CODE=$?
 
 if [[ $EXIT_CODE -eq 0 && -f "$FREQ_ISO" ]]; then
     echo ""
-    echo "OK: $FREQ_ISO"
+    if grep -qE '^(ATOM|HETATM)' "$FREQ_ISO"; then
+        echo "OK: $FREQ_ISO"
+    else
+        echo "OK (mdpocket exit 0) but $FREQ_ISO has no ATOM/HETATM records --"
+        echo "  no alpha sphere was present in >=50% of frames for this sequence."
+        echo "  This can be a genuine result (unstable/collapsed pocket) rather than a bug."
+    fi
     ls -lh mdpocket_${SEQ_ID}_*.pdb mdpocket_${SEQ_ID}_*.dx 2>/dev/null
 else
     echo ""
