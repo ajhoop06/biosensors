@@ -49,17 +49,19 @@ get_dir_type() {
     esac
 }
 
-# Newer pipeline runs write the trajectory/topology under runrel/500ns/,
-# older ones write directly into runrel/ -- mirrors contact_type_analysis.py's
-# run_dir() detection logic (keyed on medoid_PL.pdb, which moved along with
-# the trajectory files during the reorg).
-resolve_input_dir() {
+# Individual files land in either runrel/ or runrel/500ns/ independently of
+# each other -- e.g. many sequences have the .tpr directly in runrel/ even
+# though other files for that same sequence are under runrel/500ns/. So look
+# each file up on its own rather than resolving one shared directory.
+resolve_input_file() {
     local flat_dir="$1"
-    local nested_dir="${flat_dir}/500ns"
-    if [[ -f "${nested_dir}/medoid_PL.pdb" ]]; then
-        echo "$nested_dir"
+    local filename="$2"
+    if [[ -f "${flat_dir}/${filename}" ]]; then
+        echo "${flat_dir}/${filename}"
+    elif [[ -f "${flat_dir}/500ns/${filename}" ]]; then
+        echo "${flat_dir}/500ns/${filename}"
     else
-        echo "$flat_dir"
+        echo ""
     fi
 }
 
@@ -71,16 +73,16 @@ while IFS=$'\t' read -r seq_id seq_type custom_path || [[ -n "$seq_id" ]]; do
     ((total++))
 
     if [[ -n "$custom_path" ]]; then
-        IN_RUN_DIR=$(resolve_input_dir "${custom_path}/${RUNREL}")
+        IN_FLAT_DIR="${custom_path}/${RUNREL}"
         OUT_RUN_DIR="${custom_path}/${RUNREL}"
     else
         dir_type=$(get_dir_type "$seq_type")
-        IN_RUN_DIR=$(resolve_input_dir "${INPUT_BASE}/${dir_type}/${seq_id}/${RUNREL}")
+        IN_FLAT_DIR="${INPUT_BASE}/${dir_type}/${seq_id}/${RUNREL}"
         OUT_RUN_DIR="${OUTPUT_BASE}/${dir_type}/${seq_id}/${RUNREL}"
     fi
 
-    TPR="${IN_RUN_DIR}/${REF_TPR}"
-    IN_XTC="${IN_RUN_DIR}/${PL_XTC}"
+    TPR=$(resolve_input_file "$IN_FLAT_DIR" "$REF_TPR")
+    IN_XTC=$(resolve_input_file "$IN_FLAT_DIR" "$PL_XTC")
     PROT_XTC_PATH="${OUT_RUN_DIR}/${PROT_XTC}"
     PROT_PDB_PATH="${OUT_RUN_DIR}/${PROT_PDB}"
 
@@ -91,9 +93,9 @@ while IFS=$'\t' read -r seq_id seq_type custom_path || [[ -n "$seq_id" ]]; do
 
     # ── Validate inputs ───────────────────────────────────────────────────────
     abort=0
-    [[ ! -d "$IN_RUN_DIR" ]] && echo "ERROR: archive input directory not found: $IN_RUN_DIR" && abort=1
-    [[ ! -f "$TPR"     ]] && echo "ERROR: TPR not found: $TPR"               && abort=1
-    [[ ! -f "$IN_XTC"  ]] && echo "ERROR: PL trajectory not found: $IN_XTC"  && abort=1
+    [[ ! -d "$IN_FLAT_DIR" ]] && echo "ERROR: archive input directory not found: $IN_FLAT_DIR" && abort=1
+    [[ -z "$TPR"    ]] && echo "ERROR: TPR not found in $IN_FLAT_DIR or $IN_FLAT_DIR/500ns"                && abort=1
+    [[ -z "$IN_XTC" ]] && echo "ERROR: PL trajectory not found in $IN_FLAT_DIR or $IN_FLAT_DIR/500ns"      && abort=1
     if [[ $abort -eq 1 ]]; then ((failed++)); continue; fi
 
     mkdir -p "$OUT_RUN_DIR"
