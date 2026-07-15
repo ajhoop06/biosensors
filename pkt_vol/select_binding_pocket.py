@@ -44,13 +44,20 @@ def get_dir_type(seq_type):
     return mapping.get(seq_type, seq_type)
 
 
-def resolve_archive_dir(flat_dir):
-    """Newer pipeline runs write medoid_PL.pdb under runrel/500ns/, older ones
-    write directly into runrel/. Mirrors contact_type_analysis.py's run_dir()."""
-    nested_dir = os.path.join(flat_dir, "500ns")
-    if os.path.exists(os.path.join(nested_dir, "medoid_PL.pdb")):
-        return nested_dir
-    return flat_dir
+def resolve_archive_file(flat_dir, filename):
+    """Look up a file in the flat runrel/ folder first, then runrel/500ns/ --
+    files don't necessarily move together as a batch between the two layouts
+    (e.g. many sequences have the .tpr directly in runrel/ while other files
+    for that same sequence live under runrel/500ns/). Matches
+    pkt_vol_prep.sh's resolve_input_file. Returns None if not found either
+    place."""
+    flat_path = os.path.join(flat_dir, filename)
+    if os.path.exists(flat_path):
+        return flat_path
+    nested_path = os.path.join(flat_dir, "500ns", filename)
+    if os.path.exists(nested_path):
+        return nested_path
+    return None
 
 
 def parse_pdb_atoms(pdb_path, record_types=("ATOM", "HETATM")):
@@ -91,25 +98,28 @@ def get_ligand_coords(pdb_path, ligand_resname):
     return np.array(coords)
 
 
-def process_sequence(seq_id, archive_dir, run_dir, cutoff, ligand_resname):
+def process_sequence(seq_id, archive_flat_dir, run_dir, cutoff, ligand_resname):
     """Run pocket selection for a single sequence. Returns 'ok', 'skip', or 'fail'."""
 
-    pl_pdb   = os.path.join(archive_dir, "medoid_PL.pdb")
     freq_pdb = os.path.join(run_dir, f"mdpocket_{seq_id}_freq_iso_0_5.pdb")
     out_pdb  = os.path.join(run_dir, "selected_pocket.pdb")
 
     # ── Validate inputs ───────────────────────────────────────────────────────
-    if not os.path.isdir(archive_dir):
-        print(f"  SKIP: archive directory not found: {archive_dir}")
+    if not os.path.isdir(archive_flat_dir):
+        print(f"  SKIP: archive directory not found: {archive_flat_dir}")
         return "skip"
     if not os.path.isdir(run_dir):
         print(f"  SKIP: scratch run directory not found: {run_dir}")
         return "skip"
 
-    for path, label in [(pl_pdb, "medoid_PL.pdb"), (freq_pdb, "freq_iso PDB")]:
-        if not os.path.exists(path):
-            print(f"  SKIP: {label} not found: {path}")
-            return "skip"
+    pl_pdb = resolve_archive_file(archive_flat_dir, "medoid_PL.pdb")
+    if pl_pdb is None:
+        print(f"  SKIP: medoid_PL.pdb not found in {archive_flat_dir} or {archive_flat_dir}/500ns")
+        return "skip"
+
+    if not os.path.exists(freq_pdb):
+        print(f"  SKIP: freq_iso PDB not found: {freq_pdb}")
+        return "skip"
 
     # ── Skip if already done ──────────────────────────────────────────────────
     if os.path.exists(out_pdb):
@@ -192,15 +202,14 @@ def main():
             print(f"\n{seq_id}  [{seq_type}]")
 
             if custom_path:
-                archive_dir = resolve_archive_dir(os.path.join(custom_path, RUNREL))
-                run_dir     = os.path.join(custom_path, RUNREL)
+                archive_flat_dir = os.path.join(custom_path, RUNREL)
+                run_dir          = os.path.join(custom_path, RUNREL)
             else:
-                dir_type    = get_dir_type(seq_type)
-                archive_dir = resolve_archive_dir(
-                    os.path.join(ARCHIVE_BASE, dir_type, seq_id, RUNREL))
-                run_dir     = os.path.join(BASE, dir_type, seq_id, RUNREL)
+                dir_type         = get_dir_type(seq_type)
+                archive_flat_dir = os.path.join(ARCHIVE_BASE, dir_type, seq_id, RUNREL)
+                run_dir          = os.path.join(BASE, dir_type, seq_id, RUNREL)
 
-            result = process_sequence(seq_id, archive_dir, run_dir, args.cutoff, args.ligand_resname)
+            result = process_sequence(seq_id, archive_flat_dir, run_dir, args.cutoff, args.ligand_resname)
             counts[result] += 1
 
     print(f"\n{'='*35}")
