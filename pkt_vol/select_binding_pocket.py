@@ -22,10 +22,13 @@ import argparse
 import numpy as np
 
 # ── Configurable paths ────────────────────────────────────────────────────────
-# medoid_PL.pdb is read from the PetaLibrary archive, not scratch -- scratch
-# auto-deletes after 90 days and older runs' copies are already gone. The
-# freq_iso PDB (mdpocket exploration output) and selected_pocket.pdb (this
-# script's own output) are pipeline artifacts that only ever live on scratch.
+# medoid_PL.pdb is a raw MD-run file, never written to scratch by this
+# pipeline, so it's looked up in the PetaLibrary archive only. The freq_iso
+# PDB (mdpocket exploration output) is normally a scratch-only pipeline
+# artifact, but for sequences processed a while ago it can itself have aged
+# out of scratch's 90-day window -- if a prior pipeline run's outputs were
+# captured in the same archive snapshot, fall back to archive for it too.
+# selected_pocket.pdb (this script's own output) always writes to scratch.
 # Mirrors the same fix already applied to water_analysis/R_score_calc.py and
 # LIG_contacts/contact_type_analysis.py.
 ARCHIVE_BASE = "/pl/active/shirts_archive/IvanaTang/biosensors"
@@ -44,19 +47,19 @@ def get_dir_type(seq_type):
     return mapping.get(seq_type, seq_type)
 
 
-def resolve_archive_file(flat_dir, filename):
-    """Look up a file in the flat runrel/ folder first, then runrel/500ns/ --
-    files don't necessarily move together as a batch between the two layouts
-    (e.g. many sequences have the .tpr directly in runrel/ while other files
-    for that same sequence live under runrel/500ns/). Matches
-    pkt_vol_prep.sh's resolve_input_file. Returns None if not found either
-    place."""
-    flat_path = os.path.join(flat_dir, filename)
-    if os.path.exists(flat_path):
-        return flat_path
-    nested_path = os.path.join(flat_dir, "500ns", filename)
-    if os.path.exists(nested_path):
-        return nested_path
+def resolve_input_file(candidate_dirs, filename):
+    """Look up a file across an ordered list of candidate directories,
+    returning the first match found, or None. Directories don't necessarily
+    hold every file for a sequence -- e.g. some files landed directly in
+    runrel/ while others for that same sequence live under runrel/500ns/, and
+    scratch-only pipeline outputs older than 90 days may only survive in the
+    archive snapshot. Check each candidate independently rather than
+    resolving one shared directory. Matches pkt_vol_prep.sh's
+    resolve_input_file."""
+    for d in candidate_dirs:
+        path = os.path.join(d, filename)
+        if os.path.exists(path):
+            return path
     return None
 
 
@@ -101,30 +104,32 @@ def get_ligand_coords(pdb_path, ligand_resname):
 def process_sequence(seq_id, archive_flat_dir, run_dir, cutoff, ligand_resname):
     """Run pocket selection for a single sequence. Returns 'ok', 'skip', or 'fail'."""
 
-    freq_pdb = os.path.join(run_dir, f"mdpocket_{seq_id}_freq_iso_0_5.pdb")
-    out_pdb  = os.path.join(run_dir, "selected_pocket.pdb")
+    out_pdb = os.path.join(run_dir, "selected_pocket.pdb")
+
+    archive_nested_dir = os.path.join(archive_flat_dir, "500ns")
 
     # ── Validate inputs ───────────────────────────────────────────────────────
     if not os.path.isdir(archive_flat_dir):
         print(f"  SKIP: archive directory not found: {archive_flat_dir}")
         return "skip"
-    if not os.path.isdir(run_dir):
-        print(f"  SKIP: scratch run directory not found: {run_dir}")
-        return "skip"
 
-    pl_pdb = resolve_archive_file(archive_flat_dir, "medoid_PL.pdb")
+    pl_pdb = resolve_input_file([archive_flat_dir, archive_nested_dir], "medoid_PL.pdb")
     if pl_pdb is None:
-        print(f"  SKIP: medoid_PL.pdb not found in {archive_flat_dir} or {archive_flat_dir}/500ns")
+        print(f"  SKIP: medoid_PL.pdb not found in {archive_flat_dir} or {archive_nested_dir}")
         return "skip"
 
-    if not os.path.exists(freq_pdb):
-        print(f"  SKIP: freq_iso PDB not found: {freq_pdb}")
+    freq_name = f"mdpocket_{seq_id}_freq_iso_0_5.pdb"
+    freq_pdb  = resolve_input_file([run_dir, archive_flat_dir, archive_nested_dir], freq_name)
+    if freq_pdb is None:
+        print(f"  SKIP: {freq_name} not found in {run_dir}, {archive_flat_dir}, or {archive_nested_dir}")
         return "skip"
 
     # ── Skip if already done ──────────────────────────────────────────────────
     if os.path.exists(out_pdb):
         print(f"  SKIP: selected_pocket.pdb already exists")
         return "skip"
+
+    os.makedirs(run_dir, exist_ok=True)
 
     # ── Ligand centroid ───────────────────────────────────────────────────────
     try:
