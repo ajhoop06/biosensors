@@ -33,6 +33,15 @@ module load anaconda
 conda activate fpocket_env
 
 # ── Configurable paths ────────────────────────────────────────────────────────
+# INPUT_XTC/REF_PDB/SELECTED_POCKET are normally scratch-only pipeline
+# artifacts (from pkt_vol_prep.sh and select_binding_pocket.py), but for
+# sequences processed a while ago they can themselves have aged out of
+# scratch's 90-day window. Fall back to the PetaLibrary archive if missing
+# from scratch. mdpocket has a known malloc crash on long path arguments, so
+# (as before) we cd into RUN_DIR and reference bare filenames -- any file
+# resolved from the archive is copied into RUN_DIR first rather than passed
+# as a long absolute archive path.
+ARCHIVE_BASE="/pl/active/shirts_archive/IvanaTang/biosensors"
 BASE="/scratch/alpine/ivta1597/LCA_boltz_models"
 RUNREL="prod_md_0p9_cutoff_3dt_64x1_16PME_642dd"
 INPUT_XTC="protein_only.xtc"
@@ -49,6 +58,8 @@ if [[ -z "$SEQ_ID" || -z "$DIR_TYPE" ]]; then
 fi
 
 RUN_DIR="${BASE}/${DIR_TYPE}/${SEQ_ID}/${RUNREL}"
+ARCHIVE_FLAT_DIR="${ARCHIVE_BASE}/${DIR_TYPE}/${SEQ_ID}/${RUNREL}"
+ARCHIVE_NESTED_DIR="${ARCHIVE_FLAT_DIR}/500ns"
 DESCRIPTORS="${RUN_DIR}/mdpocket_${SEQ_ID}_descriptors.txt"
 
 echo "seq_id   : $SEQ_ID"
@@ -56,15 +67,35 @@ echo "dir_type : $DIR_TYPE"
 echo "run_dir  : $RUN_DIR"
 echo ""
 
-# ── Validate inputs ───────────────────────────────────────────────────────────
-if [[ ! -d "$RUN_DIR" ]]; then
-    echo "ERROR: run directory not found: $RUN_DIR"; exit 1
-fi
-for f in "${RUN_DIR}/${INPUT_XTC}" "${RUN_DIR}/${REF_PDB}" "${RUN_DIR}/${SELECTED_POCKET}"; do
-    if [[ ! -f "$f" ]]; then
-        echo "ERROR: required file not found: $f"; exit 1
+# If missing from scratch, copy in from the archive (flat then runrel/500ns/)
+# so mdpocket can still reference it as a short, bare filename.
+stage_file() {
+    local filename="$1"
+    if [[ -f "${RUN_DIR}/${filename}" ]]; then
+        return 0
+    fi
+    for d in "$ARCHIVE_FLAT_DIR" "$ARCHIVE_NESTED_DIR"; do
+        if [[ -f "${d}/${filename}" ]]; then
+            mkdir -p "$RUN_DIR"
+            cp "${d}/${filename}" "${RUN_DIR}/${filename}"
+            echo "  Staged from archive: ${d}/${filename} -> ${RUN_DIR}/${filename}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ── Validate/stage inputs ──────────────────────────────────────────────────────
+abort=0
+for f in "$INPUT_XTC" "$REF_PDB" "$SELECTED_POCKET"; do
+    if ! stage_file "$f"; then
+        echo "ERROR: $f not found in $RUN_DIR, $ARCHIVE_FLAT_DIR, or $ARCHIVE_NESTED_DIR"
+        abort=1
     fi
 done
+if [[ $abort -eq 1 ]]; then
+    exit 1
+fi
 
 # ── Skip if descriptors already exist ────────────────────────────────────────
 if [[ -f "$DESCRIPTORS" ]]; then
