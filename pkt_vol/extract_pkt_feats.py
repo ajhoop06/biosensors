@@ -10,11 +10,24 @@ Features extracted per sequence:
     pocket_vol_min          : minimum pocket volume
     pocket_vol_max          : maximum pocket volume
     pocket_vol_closed_frac  : fraction of frames below closure threshold
+    pocket_vol_early{P}_mean / late{P}_mean / drift{P} / early{P}_closed_frac /
+    late{P}_closed_frac : early vs. late trajectory comparison, mirroring
+        extract_gate_latch_rmsd_feats.py's early/late RMSD windows. Windows are
+        defined as a FRACTION of each sequence's own frame count (default: first/
+        last 20%), not an absolute ns window, because many sequences' descriptor
+        files cover far fewer frames than the nominal 500ns run (see n_frames) --
+        an absolute-ns window like the RMSD script's would silently exclude most
+        short trajectories. This makes drift comparable in relative trajectory
+        position across sequences, not in absolute simulated time.
+    pocket_vol_slope        : linear trend of pocket volume vs. fractional
+        trajectory position (0=first frame, 1=last frame), in Å³ per full
+        trajectory traversed.
 
 Output: pocket_volume_features.csv
 
 Usage:
     python extract_pocket_features.py [seq_ids_orig.txt] [--threshold 800] [--plot]
+                                       [--early-late-frac 0.2]
                                        [--structure-source {ngs_observed,designed_assumed,all}]
                                        [--structure-guide md_candidate_guide.csv]
 """
@@ -25,6 +38,7 @@ import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.stats import linregress
 
 # ── Configurable paths ────────────────────────────────────────────────────────
 BASE   = "/scratch/alpine/ivta1597/LCA_boltz_models"
@@ -77,16 +91,42 @@ def load_descriptors(desc_path):
     return df
 
 
-def extract_features(df, threshold):
-    """Compute summary statistics from per-frame pocket volume column."""
+def extract_features(df, threshold, window_frac):
+    """Compute summary statistics from per-frame pocket volume column,
+    including early-vs-late trajectory comparison. Early/late windows are
+    defined by fractional position within THIS sequence's own frame count
+    (first/last window_frac of frames), not absolute time -- descriptors.txt
+    has no time column, and sequences vary widely in how many frames they
+    actually cover (see n_frames), so a fixed-ns window (as used for gate/
+    latch RMSD) would be undefined for short trajectories."""
     vol = df["pock_volume"].values
+    n   = len(vol)
+    pct = int(round(window_frac * 100))
+
+    # Index-sliced (not a position-threshold mask) so early/late windows are
+    # never empty, even for very short trajectories where round(window_frac*n)
+    # could otherwise land past the last frame satisfying a ">=" cutoff.
+    k = max(1, int(round(window_frac * n)))
+    early_vol = vol[:k]
+    late_vol  = vol[n - k:]
+    early_mean = float(early_vol.mean())
+    late_mean  = float(late_vol.mean())
+    pos        = np.arange(n) / (n - 1) if n > 1 else np.zeros(n)
+    slope      = float(linregress(pos, vol).slope) if n > 1 else 0.0
+
     return {
         "pocket_vol_mean":        np.mean(vol),
         "pocket_vol_std":         np.std(vol),
         "pocket_vol_min":         np.min(vol),
         "pocket_vol_max":         np.max(vol),
         "pocket_vol_closed_frac": np.mean(vol < threshold),
-        "n_frames":               len(vol),
+        f"pocket_vol_early{pct}_mean":        early_mean,
+        f"pocket_vol_late{pct}_mean":         late_mean,
+        f"pocket_vol_drift{pct}":             late_mean - early_mean,
+        f"pocket_vol_early{pct}_closed_frac": float(np.mean(early_vol < threshold)),
+        f"pocket_vol_late{pct}_closed_frac":  float(np.mean(late_vol < threshold)),
+        "pocket_vol_slope":       slope,
+        "n_frames":               n,
     }
 
 
@@ -99,6 +139,12 @@ def main():
                         help="Volume threshold for closed_frac calculation in Å³ (default: 800)")
     parser.add_argument("--plot",      action="store_true",
                         help="Generate summary plots")
+    parser.add_argument("--early-late-frac", type=float, default=0.2,
+                        help="Fraction of each sequence's own frames counted as "
+                             "'early'/'late' for the drift comparison (default: 0.2, "
+                             "i.e. first/last 20%%). Proportional rather than a fixed-ns "
+                             "window since many sequences cover far fewer frames than "
+                             "the nominal 500ns run.")
     parser.add_argument("--output",    default="pocket_volume_features.csv",
                         help="Output CSV filename (default: pocket_volume_features.csv)")
     parser.add_argument("--structure-source", default="all",
@@ -153,7 +199,7 @@ def main():
 
             try:
                 df       = load_descriptors(desc_file)
-                features = extract_features(df, args.threshold)
+                features = extract_features(df, args.threshold, args.early_late_frac)
                 features["seq_id"]   = seq_id
                 features["seq_type"] = seq_type
                 records.append(features)
@@ -171,9 +217,13 @@ def main():
 
     # ── Build feature dataframe ───────────────────────────────────────────────
     feat_df = pd.DataFrame(records)
+    pct = int(round(args.early_late_frac * 100))
     col_order = ["seq_id", "seq_type", "pocket_vol_mean", "pocket_vol_std",
                  "pocket_vol_min", "pocket_vol_max", "pocket_vol_closed_frac",
-                 "n_frames"]
+                 f"pocket_vol_early{pct}_mean", f"pocket_vol_late{pct}_mean",
+                 f"pocket_vol_drift{pct}",
+                 f"pocket_vol_early{pct}_closed_frac", f"pocket_vol_late{pct}_closed_frac",
+                 "pocket_vol_slope", "n_frames"]
     feat_df = feat_df[col_order]
     feat_df.to_csv(args.output, index=False)
 
