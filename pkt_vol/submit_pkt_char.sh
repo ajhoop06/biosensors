@@ -6,10 +6,21 @@
 # mdpocket characterization using the selected_pocket.pdb from exploration.
 #
 # Usage:
-#   bash submit_mdpocket_char.sh [seq_ids_orig.txt]
+#   bash submit_mdpocket_char.sh [seq_ids_orig.txt] [--overwrite-existing]
+#
+# --overwrite-existing is passed through to every submitted job, forcing
+# mdpocket characterization to rerun instead of skipping sequences that
+# already have descriptors.
 # =============================================================================
 
-SEQ_LIST=${1:-/projects/ivta1597/biosensors/seq_ids_orig.txt}
+OVERWRITE=false
+SEQ_LIST="/projects/ivta1597/biosensors/seq_ids_orig.txt"
+for arg in "$@"; do
+    case "$arg" in
+        --overwrite-existing) OVERWRITE=true ;;
+        *)                    SEQ_LIST="$arg" ;;
+    esac
+done
 
 if [ ! -f "$SEQ_LIST" ]; then
     echo "ERROR: seq list file not found: $SEQ_LIST"
@@ -43,7 +54,7 @@ while IFS=$'\t' read -r seq_id seq_type custom_path || [[ -n "$seq_id" ]]; do
     dir_type=$(get_dir_type "$seq_type")
 
     echo "Submitting: $seq_id  [$seq_type → $dir_type]"
-    sbatch pkt_vol_char.sh "$seq_id" "$dir_type"
+    sbatch pkt_vol_char.sh "$seq_id" "$dir_type" "$OVERWRITE"
     ((submitted++))
 
 done < "$SEQ_LIST"

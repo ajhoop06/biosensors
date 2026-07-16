@@ -7,7 +7,12 @@
 # from long path lengths (known fpocket bug).
 #
 # Called by submit_mdpocket_exploration.sh:
-#   sbatch run_mdpocket_exploration.sh <seq_id> <dir_type>
+#   sbatch run_mdpocket_exploration.sh <seq_id> <dir_type> [overwrite]
+#
+# overwrite ("true"/"false", default false) forces mdpocket to rerun and
+# removes existing mdpocket_<seq_id>_* outputs first, instead of skipping
+# when freq_iso_0_5.pdb already has pocket atoms. Needed after a stale
+# input gets fixed upstream (e.g. a PetaLibrary archive resync).
 # =============================================================================
 
 #SBATCH --job-name=mdpocket_exp
@@ -42,9 +47,10 @@ PROT_PDB="protein_only.pdb"
 
 SEQ_ID=$1
 DIR_TYPE=$2
+OVERWRITE=${3:-false}
 
 if [[ -z "$SEQ_ID" || -z "$DIR_TYPE" ]]; then
-    echo "ERROR: usage: sbatch run_mdpocket_exploration.sh <seq_id> <dir_type>"
+    echo "ERROR: usage: sbatch run_mdpocket_exploration.sh <seq_id> <dir_type> [overwrite]"
     exit 1
 fi
 
@@ -67,11 +73,14 @@ if [[ ! -f "${RUN_DIR}/${PROT_PDB}" ]]; then
     echo "ERROR: protein_only.pdb not found in $RUN_DIR"; exit 1
 fi
 
-# ── Skip if already done (and non-empty) ───────────────────────────────────────
+# ── Skip if already done (and non-empty), unless overwriting ──────────────────
 # Existence alone isn't a reliable "done" signal -- an interrupted job (or a
 # past bug) can leave a 0-atom freq_iso file behind, which would otherwise be
 # skipped forever. Require at least one ATOM/HETATM record too.
-if [[ -f "$FREQ_ISO" ]] && grep -qE '^(ATOM|HETATM)' "$FREQ_ISO"; then
+if [[ "$OVERWRITE" == "true" ]]; then
+    echo "OVERWRITE: removing existing mdpocket exploration outputs"
+    rm -f "${RUN_DIR}"/mdpocket_${SEQ_ID}_*
+elif [[ -f "$FREQ_ISO" ]] && grep -qE '^(ATOM|HETATM)' "$FREQ_ISO"; then
     echo "SKIP: freq_iso_0_5.pdb already exists and has pocket atoms"
     exit 0
 elif [[ -f "$FREQ_ISO" ]]; then

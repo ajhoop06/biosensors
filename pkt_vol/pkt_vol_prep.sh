@@ -17,7 +17,13 @@
 #            -f protein_only.pdb -o mdpocket_<seq_id>
 #
 # Usage:
-#   bash run_pocket_pipeline_manual.sh [seq_ids_orig.txt]
+#   bash run_pocket_pipeline_manual.sh [seq_ids_orig.txt] [--overwrite-existing]
+#
+# --overwrite-existing regenerates protein_only.xtc/.pdb even if they already
+# exist, instead of skipping. Needed after a stale input gets fixed upstream
+# (e.g. a PetaLibrary archive resync) -- without it, the "already exists"
+# check would keep skipping sequences whose scratch outputs were built from
+# the old, truncated/stale input.
 # =============================================================================
 
 # ── Configurable paths ────────────────────────────────────────────────────────
@@ -32,7 +38,18 @@ PROT_PDB="protein_only.pdb"
 PROT_GROUP="Protein"
 # ─────────────────────────────────────────────────────────────────────────────
 
-SEQ_LIST=${1:-/projects/ivta1597/biosensors/seq_ids_orig.txt}
+OVERWRITE=false
+SEQ_LIST="/projects/ivta1597/biosensors/seq_ids_orig.txt"
+for arg in "$@"; do
+    case "$arg" in
+        --overwrite-existing) OVERWRITE=true ;;
+        *)                    SEQ_LIST="$arg" ;;
+    esac
+done
+
+# Returns 0 (run/regenerate) if OVERWRITE=true or the output file doesn't
+# exist yet. Mirrors post_processing_pipeline_worker.sh's should_run/FORCE.
+should_run() { [[ "$OVERWRITE" == "true" || ! -f "$1" ]]; }
 
 if [ ! -f "$SEQ_LIST" ]; then
     echo "ERROR: seq list file not found: $SEQ_LIST"
@@ -103,8 +120,8 @@ while IFS=$'\t' read -r seq_id seq_type custom_path || [[ -n "$seq_id" ]]; do
     # ── Step 1: strip ligand ──────────────────────────────────────────────────
     echo ""
     echo "── Step 1: strip ligand ─────────────────────────────────────────────"
-    if [[ -f "$PROT_XTC_PATH" ]]; then
-        echo "SKIP: $PROT_XTC already exists"
+    if ! should_run "$PROT_XTC_PATH"; then
+        echo "SKIP: $PROT_XTC already exists (use --overwrite-existing to regenerate)"
     else
         printf '%s\n' "$PROT_GROUP" | \
             "$GMX" trjconv \
@@ -121,8 +138,8 @@ while IFS=$'\t' read -r seq_id seq_type custom_path || [[ -n "$seq_id" ]]; do
     # ── Step 2: extract reference PDB ────────────────────────────────────────
     echo ""
     echo "── Step 2: extract reference PDB ───────────────────────────────────"
-    if [[ -f "$PROT_PDB_PATH" ]]; then
-        echo "SKIP: $PROT_PDB already exists"
+    if ! should_run "$PROT_PDB_PATH"; then
+        echo "SKIP: $PROT_PDB already exists (use --overwrite-existing to regenerate)"
     else
         printf '%s\n' "$PROT_GROUP" | \
             "$GMX" trjconv \

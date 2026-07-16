@@ -14,6 +14,7 @@ Outputs a selected_pocket.pdb per sequence for use in mdpocket characterization:
 
 Usage:
     python select_binding_pocket.py [seq_ids_orig.txt] [--cutoff 8.0] [--ligand_resname LIG]
+                                     [--overwrite-existing]
 """
 
 import os
@@ -101,7 +102,7 @@ def get_ligand_coords(pdb_path, ligand_resname):
     return np.array(coords)
 
 
-def process_sequence(seq_id, archive_flat_dir, run_dir, cutoff, ligand_resname):
+def process_sequence(seq_id, archive_flat_dir, run_dir, cutoff, ligand_resname, overwrite=False):
     """Run pocket selection for a single sequence. Returns 'ok', 'skip', or 'fail'."""
 
     out_pdb = os.path.join(run_dir, "selected_pocket.pdb")
@@ -124,9 +125,9 @@ def process_sequence(seq_id, archive_flat_dir, run_dir, cutoff, ligand_resname):
         print(f"  SKIP: {freq_name} not found in {run_dir}, {archive_flat_dir}, or {archive_nested_dir}")
         return "skip"
 
-    # ── Skip if already done ──────────────────────────────────────────────────
-    if os.path.exists(out_pdb):
-        print(f"  SKIP: selected_pocket.pdb already exists")
+    # ── Skip if already done, unless overwriting ──────────────────────────────
+    if os.path.exists(out_pdb) and not overwrite:
+        print(f"  SKIP: selected_pocket.pdb already exists (use --overwrite-existing to regenerate)")
         return "skip"
 
     os.makedirs(run_dir, exist_ok=True)
@@ -185,6 +186,9 @@ def main():
                         help="Distance cutoff in Å from ligand centroid (default: 8.0)")
     parser.add_argument("--ligand_resname",default="LIG",
                         help="Residue name of the ligand in medoid_PL.pdb (default: LIG)")
+    parser.add_argument("--overwrite-existing", action="store_true",
+                        help="Regenerate selected_pocket.pdb even if it already exists, "
+                             "instead of skipping.")
     args = parser.parse_args()
 
     if not os.path.exists(args.seq_list):
@@ -214,7 +218,8 @@ def main():
                 archive_flat_dir = os.path.join(ARCHIVE_BASE, dir_type, seq_id, RUNREL)
                 run_dir          = os.path.join(BASE, dir_type, seq_id, RUNREL)
 
-            result = process_sequence(seq_id, archive_flat_dir, run_dir, args.cutoff, args.ligand_resname)
+            result = process_sequence(seq_id, archive_flat_dir, run_dir, args.cutoff,
+                                       args.ligand_resname, overwrite=args.overwrite_existing)
             counts[result] += 1
 
     print(f"\n{'='*35}")
