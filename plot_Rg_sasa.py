@@ -3,7 +3,8 @@ plot_Rg_sasa.py — Plot per-group Rg and SASA distributions from GROMACS xvg ou
 
 Usage:
     python plot_Rg_sasa.py [--region pocket|whole] [seq_ids.txt] [--out-dir DIR]
-                            [--structure-source md_candidate_guide.csv]
+                            [--structure-source {ngs_observed,designed_assumed,all}]
+                            [--structure-guide md_candidate_guide.csv]
 
 Reads Rg_{suffix}.xvg and sasa_{suffix}.xvg from each sequence's run directory,
 computes the per-trajectory mean, and saves two comparison plots.
@@ -76,15 +77,16 @@ MD_GROUP_SUFFIX = {
 }
 
 
-def load_ngs_observed_ids(structure_source_path):
-    """seq_ids from md_candidate_guide.csv where source == ngs_observed, i.e.
-    sequencing-confirmed (Y2H/FACS sort-seq) rather than designed-and-assumed."""
-    guide = pd.read_csv(structure_source_path)
-    confirmed = guide[guide["source"] == "ngs_observed"].copy()
-    confirmed["seq_id"] = confirmed.apply(
+def load_source_ids(guide_path, source):
+    """seq_ids from md_candidate_guide.csv where source == `source` (e.g.
+    ngs_observed = sequencing-confirmed via Y2H/FACS sort-seq, vs.
+    designed_assumed)."""
+    guide = pd.read_csv(guide_path)
+    matched = guide[guide["source"] == source].copy()
+    matched["seq_id"] = matched.apply(
         lambda r: f"{r['pair_id']}_{MD_GROUP_SUFFIX.get(r['md_group'], r['md_group'])}",
         axis=1)
-    return set(confirmed["seq_id"])
+    return set(matched["seq_id"])
 
 
 def get_rundir(folder_name, label, custom_base):
@@ -170,9 +172,15 @@ def main():
         "--out-dir", default=".", help="Directory for output PNGs (default: .)"
     )
     parser.add_argument(
-        "--structure-source", default=None,
-        help="Path to md_candidate_guide.csv. If given, restricts the analysis to "
-             "sequencing-confirmed sequences only (source == ngs_observed).",
+        "--structure-source", default="all",
+        choices=["ngs_observed", "designed_assumed", "all"],
+        help="Filter sequences by md_candidate_guide.csv's source column. "
+             "'all' (default) applies no filtering.",
+    )
+    parser.add_argument(
+        "--structure-guide",
+        default="/projects/ivta1597/biosensors/md_candidate_guide.csv",
+        help="Path to md_candidate_guide.csv (default: %(default)s)",
     )
     args = parser.parse_args()
 
@@ -182,11 +190,11 @@ def main():
     seqs = read_seq_ids(args.seq_ids)
     print(f"Loaded {len(seqs)} sequences from {args.seq_ids}  |  region: {args.region}")
 
-    if args.structure_source:
-        ngs_ids = load_ngs_observed_ids(args.structure_source)
+    if args.structure_source != "all":
+        source_ids = load_source_ids(args.structure_guide, args.structure_source)
         before = len(seqs)
-        seqs = [s for s in seqs if s[0] in ngs_ids]
-        print(f"Restricting to sequencing-confirmed (source == ngs_observed) sequences: "
+        seqs = [s for s in seqs if s[0] in source_ids]
+        print(f"Restricting to source == {args.structure_source}: "
               f"{before} -> {len(seqs)}")
 
     rg_data = collect_means(seqs, f"Rg_{suffix}.xvg")

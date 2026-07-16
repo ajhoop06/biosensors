@@ -111,23 +111,24 @@ MD_GROUP_SUFFIX = {
 }
 
 
-def load_ngs_observed_ids(structure_source_path):
-    """seq_ids from md_candidate_guide.csv where source == ngs_observed, i.e.
-    sequencing-confirmed (Y2H/FACS sort-seq) rather than designed-and-assumed."""
-    guide = pd.read_csv(structure_source_path)
-    confirmed = guide[guide["source"] == "ngs_observed"].copy()
-    confirmed["seq_id"] = confirmed.apply(
+def load_source_ids(guide_path, source):
+    """seq_ids from md_candidate_guide.csv where source == `source` (e.g.
+    ngs_observed = sequencing-confirmed via Y2H/FACS sort-seq, vs.
+    designed_assumed)."""
+    guide = pd.read_csv(guide_path)
+    matched = guide[guide["source"] == source].copy()
+    matched["seq_id"] = matched.apply(
         lambda r: f"{r['pair_id']}_{MD_GROUP_SUFFIX.get(r['md_group'], r['md_group'])}",
         axis=1)
-    return set(confirmed["seq_id"])
+    return set(matched["seq_id"])
 
 
-def filter_to_ngs_observed(data, ngs_ids, label):
+def filter_to_source(data, source_ids, source, label):
     for region, df in data.items():
         before = len(df)
-        data[region] = df[df["seq_id"].isin(ngs_ids)].reset_index(drop=True)
+        data[region] = df[df["seq_id"].isin(source_ids)].reset_index(drop=True)
         print(f"  {label} {region}: {before} -> {len(data[region])} sequences "
-              f"(sequencing-confirmed only)")
+              f"(source == {source})")
     return data
 
 
@@ -408,9 +409,13 @@ def main():
     parser.add_argument("--top-n", type=int, default=6,
                         help="Number of most core/tail-divergent residues to plot individually "
                              "(default: 6, i.e. top 6 + bottom 6 by delta)")
-    parser.add_argument("--structure-source", default=None,
-                        help="Path to md_candidate_guide.csv. If given, restricts the analysis "
-                             "to sequencing-confirmed sequences only (source == ngs_observed).")
+    parser.add_argument("--structure-source", default="all",
+                        choices=["ngs_observed", "designed_assumed", "all"],
+                        help="Filter sequences by md_candidate_guide.csv's source column. "
+                             "'all' (default) applies no filtering.")
+    parser.add_argument("--structure-guide",
+                        default="/projects/ivta1597/biosensors/md_candidate_guide.csv",
+                        help="Path to md_candidate_guide.csv (default: %(default)s)")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -432,12 +437,12 @@ def main():
             "--contact-dir / --tag."
         )
 
-    if args.structure_source:
-        ngs_ids = load_ngs_observed_ids(args.structure_source)
-        print(f"\nRestricting to sequencing-confirmed (source == ngs_observed) "
-              f"sequences: {len(ngs_ids)} in {args.structure_source}")
-        r_data = filter_to_ngs_observed(r_data, ngs_ids, "R-scores")
-        contact_data = filter_to_ngs_observed(contact_data, ngs_ids, "Contact feats")
+    if args.structure_source != "all":
+        source_ids = load_source_ids(args.structure_guide, args.structure_source)
+        print(f"\nRestricting to source == {args.structure_source}: "
+              f"{len(source_ids)} in {args.structure_guide}")
+        r_data = filter_to_source(r_data, source_ids, args.structure_source, "R-scores")
+        contact_data = filter_to_source(contact_data, source_ids, args.structure_source, "Contact feats")
 
     print("\n" + "=" * 70)
     print("R-SCORE: core vs tail per-residue comparison")

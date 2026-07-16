@@ -15,7 +15,8 @@ Output: pocket_volume_features.csv
 
 Usage:
     python extract_pocket_features.py [seq_ids_orig.txt] [--threshold 800] [--plot]
-                                       [--structure-source md_candidate_guide.csv]
+                                       [--structure-source {ngs_observed,designed_assumed,all}]
+                                       [--structure-guide md_candidate_guide.csv]
 """
 
 import os
@@ -58,15 +59,16 @@ MD_GROUP_SUFFIX = {
 }
 
 
-def load_ngs_observed_ids(structure_source_path):
-    """seq_ids from md_candidate_guide.csv where source == ngs_observed, i.e.
-    sequencing-confirmed (Y2H/FACS sort-seq) rather than designed-and-assumed."""
-    guide = pd.read_csv(structure_source_path)
-    confirmed = guide[guide["source"] == "ngs_observed"].copy()
-    confirmed["seq_id"] = confirmed.apply(
+def load_source_ids(guide_path, source):
+    """seq_ids from md_candidate_guide.csv where source == `source` (e.g.
+    ngs_observed = sequencing-confirmed via Y2H/FACS sort-seq, vs.
+    designed_assumed)."""
+    guide = pd.read_csv(guide_path)
+    matched = guide[guide["source"] == source].copy()
+    matched["seq_id"] = matched.apply(
         lambda r: f"{r['pair_id']}_{MD_GROUP_SUFFIX.get(r['md_group'], r['md_group'])}",
         axis=1)
-    return set(confirmed["seq_id"])
+    return set(matched["seq_id"])
 
 
 def load_descriptors(desc_path):
@@ -99,23 +101,28 @@ def main():
                         help="Generate summary plots")
     parser.add_argument("--output",    default="pocket_volume_features.csv",
                         help="Output CSV filename (default: pocket_volume_features.csv)")
-    parser.add_argument("--structure-source", default=None,
-                        help="Path to md_candidate_guide.csv. If given, restricts the analysis "
-                             "to sequencing-confirmed sequences only (source == ngs_observed).")
+    parser.add_argument("--structure-source", default="all",
+                        choices=["ngs_observed", "designed_assumed", "all"],
+                        help="Filter sequences by md_candidate_guide.csv's source column. "
+                             "'all' (default) applies no filtering.")
+    parser.add_argument("--structure-guide",
+                        default="/projects/ivta1597/biosensors/md_candidate_guide.csv",
+                        help="Path to md_candidate_guide.csv (default: %(default)s)")
     args = parser.parse_args()
 
     if not os.path.exists(args.seq_list):
         print(f"ERROR: seq list not found: {args.seq_list}")
         sys.exit(1)
 
-    ngs_ids = load_ngs_observed_ids(args.structure_source) if args.structure_source else None
-    if ngs_ids is not None:
-        print(f"Restricting to sequencing-confirmed (source == ngs_observed) sequences: "
-              f"{len(ngs_ids)} in {args.structure_source}")
+    source_ids = None
+    if args.structure_source != "all":
+        source_ids = load_source_ids(args.structure_guide, args.structure_source)
+        print(f"Restricting to source == {args.structure_source}: "
+              f"{len(source_ids)} in {args.structure_guide}")
 
     records  = []
     missing  = []
-    skipped_unconfirmed = []
+    skipped_wrong_source = []
 
     with open(args.seq_list) as f:
         for line in f:
@@ -128,8 +135,8 @@ def main():
             seq_type    = parts[1].strip() if len(parts) > 1 else ""
             custom_path = parts[2].strip() if len(parts) > 2 else ""
 
-            if ngs_ids is not None and seq_id not in ngs_ids:
-                skipped_unconfirmed.append(seq_id)
+            if source_ids is not None and seq_id not in source_ids:
+                skipped_wrong_source.append(seq_id)
                 continue
 
             if custom_path:
@@ -175,8 +182,8 @@ def main():
     print(f"  Sequences missing   : {len(missing)}")
     if missing:
         print(f"  Missing seq_ids     : {', '.join(missing)}")
-    if ngs_ids is not None:
-        print(f"  Skipped (not sequencing-confirmed) : {len(skipped_unconfirmed)}")
+    if source_ids is not None:
+        print(f"  Skipped (source != {args.structure_source}) : {len(skipped_wrong_source)}")
 
     # ── Plots ─────────────────────────────────────────────────────────────────
     if args.plot:
