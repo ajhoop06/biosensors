@@ -31,17 +31,22 @@
 #   seq_id    - sequence identifier (e.g. pair_3059_binder)
 #   dir_type  - directory group (binders | nonbinders | neg_low_pkt | neg_fail_gate)
 #   bin_nm    - gmx spatial grid spacing in nm (default: 0.05 = 0.5 A)
-#   nab       - gmx spatial -nab (additional bins for memory allocation,
-#               default: 100, well above gmx's own default of 16). VERIFIED
-#               against a real run (bind_019_binder): the default -nab 16
-#               failed with "item outside of the allocated memory" even for
-#               a 21-frame/~750ps test window, exactly the documented
-#               KNOWN ISSUES scenario in `gmx spatial -h`. -nab 100 was only
-#               confirmed sufficient for that same small test window -- NOT
-#               yet tested against the full ~12,000-frame, 40-500ns
-#               production window, which could need more. If a job fails
-#               with "item outside of the allocated memory", rerun with a
-#               higher nab.
+#   nab       - gmx spatial -nab ("number of ADDITIONAL BINS" per
+#               `gmx spatial -h` -- padding added around the frame-0
+#               bounding box is nab * bin_nm nm, NOT a fixed nm margin;
+#               default here: 300, well above gmx's own default of 16).
+#               VERIFIED against real bind_019_binder runs:
+#               - gmx's own default -nab 16 failed even for a 21-frame/
+#                 ~750ps test window ("item outside of the allocated
+#                 memory"), the documented KNOWN ISSUES scenario in
+#                 `gmx spatial -h`.
+#               - -nab 100 (= 5 nm padding at bin=0.05) was sufficient for
+#                 that short window but FAILED on the full ~12,000-frame,
+#                 40-500ns production run -- a water molecule drifted
+#                 ~0.02 nm past the padded box late in the trajectory,
+#                 something the short test window had no time to expose.
+#               If a job fails with "item outside of the allocated
+#               memory", rerun with a higher nab (padding = nab * bin_nm).
 #
 # --time=08:00:00 below is an ESTIMATE, not a measurement: gmx spatial -h
 # quotes ~30 min for a 50ns/32,000-atom trajectory; this system is a
@@ -70,7 +75,7 @@ conda activate biosensors
 seq_id=$1
 dir_type=$2
 bin_nm=${3:-0.05}
-nab=${4:-100}
+nab=${4:-300}
 
 # ── Configurable paths ────────────────────────────────────────────────────────
 ARCHIVE_BASE="/pl/active/shirts_archive/IvanaTang/biosensors"
