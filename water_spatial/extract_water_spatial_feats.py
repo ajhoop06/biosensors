@@ -95,11 +95,15 @@ def parse_cube(cube_path):
         step_bohr[axis] = float(parts[1 + axis])
 
     data_start = 6 + natoms
-    values = []
+    # np.array(..., dtype=float) on the pre-split token list avoids building a
+    # list of individually-boxed Python float objects (float(x) per token) --
+    # matters here since -nab 300 (needed to fix a separate gmx spatial
+    # memory error) inflates the production-scale cube's padded bounding box
+    # well beyond what the short local test window produced.
+    tokens = []
     for line in lines[data_start:]:
-        values.extend(float(x) for x in line.split())
-
-    density = np.array(values).reshape(dims)  # Z fastest already matches this shape/order
+        tokens.extend(line.split())
+    density = np.array(tokens, dtype=np.float64).reshape(dims)  # Z fastest already matches this shape/order
 
     origin_ang = origin_bohr * BOHR_TO_ANG
     step_ang   = step_bohr * BOHR_TO_ANG
@@ -123,17 +127,43 @@ def ligand_centroid_ang(ref_pdb, fit_trim_xtc, lig_resname="LIG"):
 def pocket_density(origin_ang, step_ang, density, centroid_ang, cutoff_ang):
     """Mean raw per-frame occupancy count within `cutoff_ang` of
     `centroid_ang`, plus the voxel volume (Angstrom^3) needed to convert
-    that into an actual number density."""
+    that into an actual number density.
+
+    Restricts the meshgrid/distance computation to a small index sub-box
+    around the centroid instead of the full (NX,NY,NZ) grid. The full-grid
+    version OOM'd in production: -nab 300 (needed to fix a separate
+    `gmx spatial` "item outside of allocated memory" error) pads the cube's
+    bounding box well beyond the pocket region actually needed here, so a
+    full-grid meshgrid could be tens of GB even though only a few thousand
+    voxels near the ligand are ever used."""
     nx, ny, nz = density.shape
-    ix, iy, iz = np.meshgrid(np.arange(nx), np.arange(ny), np.arange(nz), indexing="ij")
+    dims = (nx, ny, nz)
+    lo_idx = np.zeros(3, dtype=int)
+    hi_idx = np.zeros(3, dtype=int)
+    for axis in range(3):
+        lo = int(np.floor((centroid_ang[axis] - cutoff_ang - origin_ang[axis]) / step_ang[axis]))
+        hi = int(np.ceil((centroid_ang[axis] + cutoff_ang - origin_ang[axis]) / step_ang[axis]))
+        lo_idx[axis] = max(lo, 0)
+        hi_idx[axis] = min(hi, dims[axis] - 1)
+
+    voxel_volume_ang3 = float(step_ang[0] * step_ang[1] * step_ang[2])
+    if np.any(hi_idx < lo_idx):
+        return np.nan, 0, voxel_volume_ang3
+
+    sub_density = density[lo_idx[0]:hi_idx[0] + 1,
+                           lo_idx[1]:hi_idx[1] + 1,
+                           lo_idx[2]:hi_idx[2] + 1]
+    ix, iy, iz = np.meshgrid(np.arange(lo_idx[0], hi_idx[0] + 1),
+                              np.arange(lo_idx[1], hi_idx[1] + 1),
+                              np.arange(lo_idx[2], hi_idx[2] + 1),
+                              indexing="ij")
     voxel_xyz = origin_ang + np.stack([ix, iy, iz], axis=-1) * step_ang
     dist = np.linalg.norm(voxel_xyz - centroid_ang, axis=-1)
     mask = dist <= cutoff_ang
     n_voxels = int(mask.sum())
-    voxel_volume_ang3 = float(step_ang[0] * step_ang[1] * step_ang[2])
     if n_voxels == 0:
         return np.nan, 0, voxel_volume_ang3
-    return float(density[mask].mean()), n_voxels, voxel_volume_ang3
+    return float(sub_density[mask].mean()), n_voxels, voxel_volume_ang3
 
 
 def main():
