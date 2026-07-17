@@ -112,6 +112,7 @@ pair_1961_nb	False Positive
 pair_0008_low_pkt	Low Confidence
 pair_0393_low_pkt	Low Confidence
 pair_0482_low_pkt	Low Confidence
+pair_0482_nb	False Positive
 pair_1331_low_pkt	Low Confidence
 pair_1931_low_pkt	Low Confidence
 pair_0065_low_pkt	Low Confidence

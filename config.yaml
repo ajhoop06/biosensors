@@ -1,6 +1,6 @@
 # ── Paths ──────────────────────────────────────────────────────────────────────
 paths:
-  base: "/scratch/alpine/ivta1597/LCA_boltz_models"   # Alpine: scratch; local: OneDrive mirror
+  base: "/pl/active/shirts_archive/IvanaTang/biosensors"   # durable archive; scratch auto-deletes after 90 days
   runrel: "prod_md_0p9_cutoff_3dt_64x1_16PME_642dd"
   type_subdir:
     binder: "binders"
