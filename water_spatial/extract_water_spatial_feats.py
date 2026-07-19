@@ -7,6 +7,18 @@ occupancy, in the water_spatial_prep.sh/water_spatial_run.sh fitted-trajectory
 reference frame) and computes a per-sequence scalar pocket water density: the
 mean voxel density within a fixed radius of the ligand's mean position.
 
+A first pass at this (the plain `pocket_water_density_*` columns) averages
+over every voxel in that flat 8 A sphere, including voxels that are simply
+inside the ligand or a pocket-lining side chain -- both physically exclude
+water regardless of whether the sequence is a binder, so a large chunk of
+the "depletion" that produced was just anatomy, not a hydrophobic-exclusion
+signal, and it diluted whatever real group difference might exist. The
+`pocket_water_density_accessible_*` columns restrict the same sphere to
+voxels that are NOT within a protein/ligand heavy atom's van der Waals
+radius (mdtraj Element.radius, Bondi-based) for most of a sampled set of
+frames -- i.e. genuinely solvent-accessible space near the ligand, not
+atom-occupied volume.
+
 Ligand centroid is computed directly from this pipeline's own
 fit_trim.xtc + fit_trim_ref.pdb (mean LIG heavy-atom position across the
 fitted trajectory) rather than from the separate RMSD pipeline's
@@ -55,6 +67,7 @@ import argparse
 import numpy as np
 import pandas as pd
 import mdtraj as md
+from scipy.spatial import cKDTree
 
 BOHR_TO_ANG = 0.529177210903
 
@@ -64,6 +77,24 @@ BOHR_TO_ANG = 0.529177210903
 # for interpretability -- verify against this system's actual water model
 # if that distinction matters (TIP3P vs SPC/E etc. differ slightly).
 BULK_WATER_DENSITY_PER_ANG3 = 0.0334
+
+# Generic heavy-atom van der Waals radius (Angstrom, ~carbon's Bondi radius)
+# used only if mdtraj's own per-element radius is missing/zero for some atom.
+FALLBACK_ATOM_RADIUS_ANG = 1.70
+
+# solvent_accessible_mask() samples this many evenly-strided frames from the
+# ~12,000-frame production trajectory rather than checking every frame --
+# the protein backbone is fit-aligned and relatively static in this
+# reference frame, so a coarse stride is a reasonable cost/accuracy
+# tradeoff for identifying which voxels are typically atom-occupied.
+DEFAULT_N_ACCESSIBILITY_FRAMES = 50
+
+# A voxel counts as atom-occupied (and is excluded) if it falls within a
+# protein/ligand heavy atom's van der Waals radius in at least this fraction
+# of the sampled frames -- majority-vote rather than "ever occupied", so a
+# voxel only transiently grazed by a fluctuating side chain still counts as
+# solvent-accessible.
+DEFAULT_OCCUPIED_FRAME_FRAC = 0.5
 
 TYPE_SUBDIR = {
     "Binder":         "binders",
@@ -110,21 +141,38 @@ def parse_cube(cube_path):
     return origin_ang, step_ang, dims, density
 
 
-def ligand_centroid_ang(ref_pdb, fit_trim_xtc, lig_resname="LIG"):
+def ligand_centroid_ang(traj, lig_resname="LIG"):
     """Mean position (Angstrom) of the ligand's heavy atoms across the fitted,
     production-windowed trajectory -- the same reference frame the cube grid
-    was generated in."""
-    traj = md.load(fit_trim_xtc, top=ref_pdb)
-    top  = traj.topology
+    was generated in. Takes an already-loaded mdtraj Trajectory (see main())
+    rather than loading fit_trim.xtc itself, since solvent_accessible_mask()
+    needs the same ~4 GB trajectory loaded too -- loading it once and sharing
+    it avoids doubling memory/IO cost per sequence."""
+    top = traj.topology
     lig_atoms = [a.index for r in top.residues if r.name == lig_resname
                  for a in r.atoms if a.element.symbol != 'H']
     if not lig_atoms:
-        raise ValueError(f"No residue named '{lig_resname}' found in {ref_pdb}")
+        raise ValueError(f"No residue named '{lig_resname}' found in topology")
     com_per_frame = traj.xyz[:, lig_atoms, :].mean(axis=1)   # (F, 3), nm
     return com_per_frame.mean(axis=0) * 10.0                  # -> Angstrom
 
 
-def pocket_density(origin_ang, step_ang, density, centroid_ang, cutoff_ang):
+def _local_index_bounds(dims, origin_ang, step_ang, centroid_ang, cutoff_ang):
+    """Index range (inclusive) of the small local sub-box within `cutoff_ang`
+    of `centroid_ang`, clamped to the grid. Shared by pocket_density() and
+    solvent_accessible_mask() so both operate over the exact same sub-box."""
+    lo_idx = np.zeros(3, dtype=int)
+    hi_idx = np.zeros(3, dtype=int)
+    for axis in range(3):
+        lo = int(np.floor((centroid_ang[axis] - cutoff_ang - origin_ang[axis]) / step_ang[axis]))
+        hi = int(np.ceil((centroid_ang[axis] + cutoff_ang - origin_ang[axis]) / step_ang[axis]))
+        lo_idx[axis] = max(lo, 0)
+        hi_idx[axis] = min(hi, dims[axis] - 1)
+    return lo_idx, hi_idx
+
+
+def pocket_density(origin_ang, step_ang, density, centroid_ang, cutoff_ang,
+                    accessible_mask=None):
     """Mean raw per-frame occupancy count within `cutoff_ang` of
     `centroid_ang`, plus the voxel volume (Angstrom^3) needed to convert
     that into an actual number density.
@@ -135,16 +183,13 @@ def pocket_density(origin_ang, step_ang, density, centroid_ang, cutoff_ang):
     `gmx spatial` "item outside of allocated memory" error) pads the cube's
     bounding box well beyond the pocket region actually needed here, so a
     full-grid meshgrid could be tens of GB even though only a few thousand
-    voxels near the ligand are ever used."""
-    nx, ny, nz = density.shape
-    dims = (nx, ny, nz)
-    lo_idx = np.zeros(3, dtype=int)
-    hi_idx = np.zeros(3, dtype=int)
-    for axis in range(3):
-        lo = int(np.floor((centroid_ang[axis] - cutoff_ang - origin_ang[axis]) / step_ang[axis]))
-        hi = int(np.ceil((centroid_ang[axis] + cutoff_ang - origin_ang[axis]) / step_ang[axis]))
-        lo_idx[axis] = max(lo, 0)
-        hi_idx[axis] = min(hi, dims[axis] - 1)
+    voxels near the ligand are ever used.
+
+    If `accessible_mask` (from solvent_accessible_mask(), same sub-box shape)
+    is given, voxels it marks as atom-occupied are excluded from the mean in
+    addition to the flat distance cutoff -- see module docstring."""
+    dims = density.shape
+    lo_idx, hi_idx = _local_index_bounds(dims, origin_ang, step_ang, centroid_ang, cutoff_ang)
 
     voxel_volume_ang3 = float(step_ang[0] * step_ang[1] * step_ang[2])
     if np.any(hi_idx < lo_idx):
@@ -160,10 +205,72 @@ def pocket_density(origin_ang, step_ang, density, centroid_ang, cutoff_ang):
     voxel_xyz = origin_ang + np.stack([ix, iy, iz], axis=-1) * step_ang
     dist = np.linalg.norm(voxel_xyz - centroid_ang, axis=-1)
     mask = dist <= cutoff_ang
+    if accessible_mask is not None:
+        mask = mask & accessible_mask
     n_voxels = int(mask.sum())
     if n_voxels == 0:
         return np.nan, 0, voxel_volume_ang3
     return float(sub_density[mask].mean()), n_voxels, voxel_volume_ang3
+
+
+def solvent_accessible_mask(traj, dims, origin_ang, step_ang, centroid_ang, cutoff_ang,
+                             n_sample_frames=DEFAULT_N_ACCESSIBILITY_FRAMES,
+                             occupied_frame_frac=DEFAULT_OCCUPIED_FRAME_FRAC):
+    """Boolean array, same shape as pocket_density()'s local sub-box, True
+    where a voxel is "solvent-accessible": NOT within a protein/ligand heavy
+    atom's van der Waals radius in at least `occupied_frame_frac` of
+    `n_sample_frames` evenly-strided frames from `traj`.
+
+    Only protein + ligand heavy atoms count as occluding -- water/ions are
+    exactly what pocket_density() is measuring, not something to exclude.
+    Nearest-atom-only check (via a per-frame KD-tree): for atoms this close
+    in size (~1.5-1.8 A heavy-atom radii), a voxel within a *farther* atom's
+    radius while just outside its nearest atom's radius is a rare edge case,
+    not worth the cost of an exact multi-atom overlap test.
+
+    Cheap because it only runs over the same small local sub-box
+    pocket_density() restricts to (a few thousand voxels), not the full
+    padded cube grid -- same OOM concern that motivated that restriction
+    would apply here too otherwise."""
+    top = traj.topology
+    atom_indices = [a.index for a in top.atoms
+                    if a.element.symbol != 'H'
+                    and (a.residue.is_protein or a.residue.name == "LIG")]
+    if not atom_indices:
+        raise ValueError("No protein/LIG heavy atoms found for exclusion mask")
+
+    def _atom_radius_ang(atom):
+        r = atom.element.radius
+        return r * 10.0 if r and r > 0 else FALLBACK_ATOM_RADIUS_ANG
+
+    atom_radii_ang = np.array([_atom_radius_ang(top.atom(i)) for i in atom_indices])
+
+    lo_idx, hi_idx = _local_index_bounds(dims, origin_ang, step_ang, centroid_ang, cutoff_ang)
+    if np.any(hi_idx < lo_idx):
+        return np.zeros(0, dtype=bool)
+
+    ix, iy, iz = np.meshgrid(np.arange(lo_idx[0], hi_idx[0] + 1),
+                              np.arange(lo_idx[1], hi_idx[1] + 1),
+                              np.arange(lo_idx[2], hi_idx[2] + 1),
+                              indexing="ij")
+    voxel_xyz = origin_ang + np.stack([ix, iy, iz], axis=-1) * step_ang
+    sub_shape = voxel_xyz.shape[:3]
+    voxel_xyz_flat = voxel_xyz.reshape(-1, 3)
+
+    n_frames_total = traj.n_frames
+    stride = max(1, n_frames_total // n_sample_frames)
+    frame_idxs = np.arange(0, n_frames_total, stride)
+
+    occupied_count = np.zeros(voxel_xyz_flat.shape[0], dtype=int)
+    for fidx in frame_idxs:
+        atom_xyz_ang = traj.xyz[fidx, atom_indices, :] * 10.0  # nm -> Angstrom
+        tree = cKDTree(atom_xyz_ang)
+        dist, nearest_idx = tree.query(voxel_xyz_flat, k=1)
+        occupied_count += (dist <= atom_radii_ang[nearest_idx]).astype(int)
+
+    occupied_frac = occupied_count / len(frame_idxs)
+    accessible_flat = occupied_frac < occupied_frame_frac
+    return accessible_flat.reshape(sub_shape)
 
 
 def main():
@@ -177,6 +284,18 @@ def main():
                              "pkt_vol/select_binding_pocket.py's pocket-sphere cutoff).")
     parser.add_argument("--base", default=BASE)
     parser.add_argument("--output", default="water_spatial_feats.csv")
+    parser.add_argument("--skip-solvent-accessible", action="store_true",
+                        help="Skip the pocket_water_density_accessible_* columns "
+                             "(cheaper, but loses the atom-occlusion-corrected metric).")
+    parser.add_argument("--n-accessibility-frames", type=int,
+                        default=DEFAULT_N_ACCESSIBILITY_FRAMES,
+                        help=f"Frames sampled to build the solvent-accessible mask "
+                             f"(default: {DEFAULT_N_ACCESSIBILITY_FRAMES}).")
+    parser.add_argument("--occupied-frac-threshold", type=float,
+                        default=DEFAULT_OCCUPIED_FRAME_FRAC,
+                        help=f"A voxel is excluded if atom-occupied in at least this "
+                             f"fraction of sampled frames (default: "
+                             f"{DEFAULT_OCCUPIED_FRAME_FRAC}).")
     args = parser.parse_args()
 
     if not os.path.exists(args.seq_list):
@@ -214,7 +333,8 @@ def main():
 
             try:
                 origin_ang, step_ang, dims, density = parse_cube(cube_path)
-                centroid_ang = ligand_centroid_ang(ref_pdb, fit_xtc)
+                traj = md.load(fit_xtc, top=ref_pdb)
+                centroid_ang = ligand_centroid_ang(traj)
                 mean_count, n_voxels, voxel_vol_ang3 = pocket_density(
                     origin_ang, step_ang, density, centroid_ang, args.pocket_cutoff)
 
@@ -227,7 +347,7 @@ def main():
                 frac_bulk = (density_per_ang3 / BULK_WATER_DENSITY_PER_ANG3
                              if not np.isnan(density_per_ang3) else np.nan)
 
-                records.append({
+                record = {
                     "seq_id":   seq_id,
                     "seq_type": seq_type,
                     "pocket_water_density_mean": mean_count,
@@ -235,10 +355,41 @@ def main():
                     "pocket_water_density_frac_bulk": frac_bulk,
                     "pocket_water_density_n_voxels":  n_voxels,
                     "grid_dims": f"{dims[0]}x{dims[1]}x{dims[2]}",
-                })
-                print(f"OK: {seq_id}  [{seq_type}]  "
-                      f"mean_count={mean_count:.4f}  frac_bulk={frac_bulk:.4f}  "
-                      f"n_voxels={n_voxels}")
+                }
+                log_line = (f"OK: {seq_id}  [{seq_type}]  "
+                            f"mean_count={mean_count:.4f}  frac_bulk={frac_bulk:.4f}  "
+                            f"n_voxels={n_voxels}")
+
+                if not args.skip_solvent_accessible:
+                    acc_mask = solvent_accessible_mask(
+                        traj, dims, origin_ang, step_ang, centroid_ang, args.pocket_cutoff,
+                        n_sample_frames=args.n_accessibility_frames,
+                        occupied_frame_frac=args.occupied_frac_threshold)
+                    acc_mean, acc_n_voxels, _ = pocket_density(
+                        origin_ang, step_ang, density, centroid_ang, args.pocket_cutoff,
+                        accessible_mask=acc_mask)
+                    acc_density_per_ang3 = (acc_mean / voxel_vol_ang3
+                                             if voxel_vol_ang3 > 0 and not np.isnan(acc_mean)
+                                             else np.nan)
+                    acc_frac_bulk = (acc_density_per_ang3 / BULK_WATER_DENSITY_PER_ANG3
+                                      if not np.isnan(acc_density_per_ang3) else np.nan)
+                    record.update({
+                        "pocket_water_density_accessible_mean": acc_mean,
+                        "pocket_water_density_accessible_per_ang3": acc_density_per_ang3,
+                        "pocket_water_density_accessible_frac_bulk": acc_frac_bulk,
+                        "pocket_water_density_accessible_n_voxels": acc_n_voxels,
+                        # what fraction of the flat sphere was actually water-
+                        # accessible at all -- a diagnostic on its own, since a
+                        # low value here is exactly what explained the
+                        # unexpectedly-low plain pocket_water_density_mean.
+                        "pocket_water_density_frac_solvent_accessible":
+                            (acc_n_voxels / n_voxels if n_voxels else np.nan),
+                    })
+                    log_line += (f"  |  accessible_frac_bulk={acc_frac_bulk:.4f}  "
+                                 f"accessible_n_voxels={acc_n_voxels}/{n_voxels}")
+
+                records.append(record)
+                print(log_line)
             except Exception as e:
                 print(f"ERROR: {seq_id}  -  {e}")
                 missing.append(seq_id)
