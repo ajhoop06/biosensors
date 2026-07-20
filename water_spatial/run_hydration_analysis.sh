@@ -16,18 +16,20 @@
 
 # ============================================================
 # Usage:
-#   sbatch run_hydration_analysis.sh <seq_id> <seq_type> [start_ns] [end_ns] [hydration_cutoff] [stride]
+#   sbatch run_hydration_analysis.sh <seq_id> <seq_type> [reference_region] [start_ns] [end_ns] [cutoffs] [stride]
 #
 # Arguments:
 #   seq_id            - sequence identifier (e.g. pair_3059_binder)
 #   seq_type          - directory group (binders | nonbinders | neg_low_pkt | neg_fail_gate)
+#   reference_region  - ligand | pocket_residues (default: ligand)
 #   start_ns          - start of analysis window in ns (default: 40)
 #   end_ns            - end of analysis window in ns   (default: 500)
-#   hydration_cutoff  - first-hydration-shell cutoff in Angstrom (default: 3.5)
+#   cutoffs           - comma-separated hydration-shell cutoffs in Angstrom (default: 3,4,5,6,8)
 #   stride            - frame stride (default: 10)
 #
 # Example:
 #   sbatch run_hydration_analysis.sh pair_3059_binder binders
+#   sbatch run_hydration_analysis.sh pair_3059_binder binders pocket_residues
 # ============================================================
 
 set -euo pipefail
@@ -38,17 +40,19 @@ conda activate biosensors
 
 seq_id=$1
 seq_type=$2
-start_ns=${3:-40}
-end_ns=${4:-500}
-hydration_cutoff=${5:-3.5}
-stride=${6:-10}
+reference_region=${3:-ligand}
+start_ns=${4:-40}
+end_ns=${5:-500}
+cutoffs=${6:-3,4,5,6,8}
+stride=${7:-10}
 
 echo "============================================================"
 echo "  Hydration-shell water count"
 echo "  seq_id   : $seq_id"
 echo "  seq_type : $seq_type"
+echo "  region   : ${reference_region}"
 echo "  window   : ${start_ns}-${end_ns} ns"
-echo "  cutoff   : ${hydration_cutoff} A"
+echo "  cutoffs  : ${cutoffs} A"
 echo "  stride   : ${stride}"
 echo "  start    : $(date)"
 echo "============================================================"
@@ -56,9 +60,10 @@ echo "============================================================"
 python hydration_calc.py \
     --seq_id   "$seq_id"   \
     --seq_type "$seq_type" \
+    --reference-region "$reference_region" \
     --start-ns "$start_ns" \
     --end-ns   "$end_ns"   \
-    --hydration-cutoff "$hydration_cutoff" \
+    --cutoffs  "$cutoffs"  \
     --stride   "$stride"
 
 echo ""
