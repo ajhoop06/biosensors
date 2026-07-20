@@ -1,9 +1,10 @@
 """
 aggregate_hydration_feats.py
 
-Reads each sequence's {seq_id}_hydration_{TAG}.csv (produced by
-hydration_calc.py, one row per frame: time_ns, hydration_count) and computes
-per-sequence summary features, mirroring pkt_vol/extract_pkt_feats.py's
+Reads each sequence's {seq_id}_hydration_{region}_{TAG}.csv (produced by
+hydration_calc.py, one row per frame: time_ns plus one hydration_count_*
+column per cutoff radius) and computes per-sequence summary features for
+EVERY hydration_count_* column present, mirroring pkt_vol/extract_pkt_feats.py's
 early/late/drift/slope column family for consistency with the rest of the
 feature table.
 
@@ -17,6 +18,7 @@ Output: water_density_feats.csv
 
 Usage:
     python aggregate_hydration_feats.py [seq_ids_ngs_observed.txt] [--start-ns 40] [--end-ns 500]
+                                         [--reference-region {ligand,pocket_residues}]
                                          [--early-late-frac 0.2] [--out water_density_feats.csv]
                                          [--structure-source {ngs_observed,designed_assumed,all}]
 """
@@ -62,36 +64,39 @@ def load_source_ids(guide_path, source):
 
 
 def extract_features(df, window_frac):
-    """Compute summary statistics from a per-frame hydration_count series,
-    including early-vs-late trajectory comparison (fractional window, since
-    frame counts can vary across sequences after striding)."""
-    t   = df["time_ns"].values
-    cnt = df["hydration_count"].values
-    n   = len(cnt)
+    """Compute summary statistics for EVERY hydration_count_* column present
+    (one per cutoff radius written by hydration_calc.py), including
+    early-vs-late trajectory comparison (fractional window, since frame
+    counts can vary across sequences after striding)."""
+    t = df["time_ns"].values
+    n = len(t)
     pct = int(round(window_frac * 100))
-
     k = max(1, int(round(window_frac * n)))
-    early_cnt = cnt[:k]
-    late_cnt  = cnt[n - k:]
-    early_mean = float(early_cnt.mean())
-    late_mean  = float(late_cnt.mean())
-
     pos = np.arange(n) / (n - 1) if n > 1 else np.zeros(n)
-    frac_slope = float(linregress(pos, cnt).slope) if n > 1 else 0.0
-    ns_slope   = float(linregress(t, cnt).slope) if n > 1 else 0.0
 
-    return {
-        "hydration_count_mean":        float(np.mean(cnt)),
-        "hydration_count_std":         float(np.std(cnt)),
-        "hydration_count_min":         float(np.min(cnt)),
-        "hydration_count_max":         float(np.max(cnt)),
-        f"hydration_count_early{pct}_mean": early_mean,
-        f"hydration_count_late{pct}_mean":  late_mean,
-        f"hydration_count_drift{pct}":      late_mean - early_mean,
-        "hydration_count_slope":       frac_slope,
-        "hydration_count_slope_per_ns": ns_slope,
-        "n_frames":                    n,
-    }
+    count_cols = [c for c in df.columns if c.startswith("hydration_count_")]
+    features = {}
+    for col in count_cols:
+        cnt = df[col].values
+        early_mean = float(cnt[:k].mean())
+        late_mean  = float(cnt[n - k:].mean())
+        frac_slope = float(linregress(pos, cnt).slope) if n > 1 else 0.0
+        ns_slope   = float(linregress(t, cnt).slope) if n > 1 else 0.0
+
+        features.update({
+            f"{col}_mean":        float(np.mean(cnt)),
+            f"{col}_std":         float(np.std(cnt)),
+            f"{col}_min":         float(np.min(cnt)),
+            f"{col}_max":         float(np.max(cnt)),
+            f"{col}_early{pct}_mean": early_mean,
+            f"{col}_late{pct}_mean":  late_mean,
+            f"{col}_drift{pct}":      late_mean - early_mean,
+            f"{col}_slope":       frac_slope,
+            f"{col}_slope_per_ns": ns_slope,
+        })
+
+    features["n_frames"] = n
+    return features, count_cols
 
 
 def main():
@@ -101,6 +106,10 @@ def main():
                         default="/projects/ivta1597/biosensors/seq_ids_ngs_observed.txt")
     parser.add_argument("--start-ns", type=float, default=40.0)
     parser.add_argument("--end-ns",   type=float, default=500.0)
+    parser.add_argument("--reference-region", choices=["ligand", "pocket_residues"],
+                        default="ligand",
+                        help="Which hydration_calc.py reference-region output to read "
+                             "(default: ligand)")
     parser.add_argument("--early-late-frac", type=float, default=0.2,
                         help="Fraction of each sequence's own frames counted as "
                              "'early'/'late' for the drift comparison (default: 0.2).")
@@ -127,10 +136,12 @@ def main():
               f"{len(source_ids)} in {args.structure_guide}")
 
     TAG = f"{int(args.start_ns)}_{int(args.end_ns)}ns"
+    REGION_TAG = {"ligand": "ligand", "pocket_residues": "pocket"}[args.reference_region]
 
     records = []
     missing = []
     skipped_wrong_source = []
+    all_count_cols = []   # preserves discovery order across sequences
 
     with open(args.seq_list) as f:
         for line in f:
@@ -153,7 +164,7 @@ def main():
                 dir_type = TYPE_SUBDIR.get(seq_type, seq_type)
                 run_dir  = os.path.join(args.base, dir_type, seq_id, f"water_density_{TAG}")
 
-            csv_file = os.path.join(run_dir, f"{seq_id}_hydration_{TAG}.csv")
+            csv_file = os.path.join(run_dir, f"{seq_id}_hydration_{REGION_TAG}_{TAG}.csv")
 
             if not os.path.exists(csv_file):
                 print(f"MISSING: {seq_id}  [{seq_type}]  ->  {csv_file}")
@@ -161,14 +172,21 @@ def main():
                 continue
 
             try:
-                df       = pd.read_csv(csv_file)
-                features = extract_features(df, args.early_late_frac)
+                df = pd.read_csv(csv_file)
+                features, count_cols = extract_features(df, args.early_late_frac)
                 features["seq_id"]   = seq_id
                 features["seq_type"] = seq_type
                 records.append(features)
-                print(f"OK: {seq_id}  [{seq_type}]  "
-                      f"mean={features['hydration_count_mean']:.2f}  "
-                      f"n={features['n_frames']}")
+                for c in count_cols:
+                    if c not in all_count_cols:
+                        all_count_cols.append(c)
+                headline = count_cols[0] if count_cols else None
+                headline_mean = features.get(f"{headline}_mean") if headline else None
+                if headline_mean is not None:
+                    print(f"OK: {seq_id}  [{seq_type}]  "
+                          f"{headline}_mean={headline_mean:.2f}  n={features['n_frames']}")
+                else:
+                    print(f"OK: {seq_id}  [{seq_type}]  n={features['n_frames']}")
             except Exception as e:
                 print(f"ERROR: {seq_id}  -  {e}")
                 missing.append(seq_id)
@@ -179,11 +197,12 @@ def main():
 
     feat_df = pd.DataFrame(records)
     pct = int(round(args.early_late_frac * 100))
-    col_order = ["seq_id", "seq_type", "hydration_count_mean", "hydration_count_std",
-                 "hydration_count_min", "hydration_count_max",
-                 f"hydration_count_early{pct}_mean", f"hydration_count_late{pct}_mean",
-                 f"hydration_count_drift{pct}",
-                 "hydration_count_slope", "hydration_count_slope_per_ns", "n_frames"]
+    col_order = ["seq_id", "seq_type"]
+    for col in all_count_cols:
+        col_order += [f"{col}_mean", f"{col}_std", f"{col}_min", f"{col}_max",
+                      f"{col}_early{pct}_mean", f"{col}_late{pct}_mean",
+                      f"{col}_drift{pct}", f"{col}_slope", f"{col}_slope_per_ns"]
+    col_order.append("n_frames")
     feat_df = feat_df[col_order]
     feat_df.to_csv(args.output, index=False)
 

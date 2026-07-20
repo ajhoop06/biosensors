@@ -3,9 +3,16 @@ water_density_analysis.py — Does water density in/around the LCA pocket
 distinguish binders from nonbinders, and is it worth adding to the ML
 feature table?
 
-Two independently-computed water-density metrics are evaluated:
-  hydration_count_mean        water_analysis/hydration_calc.py + aggregate_hydration_feats.py
-                               (mdtraj: water oxygens within 3.5 A of ligand heavy atoms)
+Water-density metrics evaluated:
+  hydration_count_ligand_4A_mean / hydration_count_pocket_4A_mean
+                               water_spatial/hydration_calc.py + aggregate_hydration_feats.py
+                               (mdtraj: water oxygens within 4 A of ligand heavy atoms /
+                               pocket-lining residue heavy atoms, periodic-corrected;
+                               run once per --reference-region, merge both CSVs). These
+                               two are the pre-registered headline scalars for the
+                               significance gate below -- the full multi-cutoff/early-
+                               late-drift-slope family from aggregate_hydration_feats.py
+                               is descriptive only, not gated (see HYDRATION_HEADLINE_COLS).
   pocket_water_density_mean   water_spatial/{water_spatial_prep,run}.sh + extract_water_spatial_feats.py
                                (gmx spatial: voxel density within 8 A of the ligand centroid)
 
@@ -27,13 +34,21 @@ This script does two things, in order:
      the model, since a non-discriminating feature only adds noise/
      overfitting risk to GroupAwareSelector rather than signal.
 
+     The hydration family is scoped to its two pre-registered headline
+     columns rather than every hydration_count_* column present -- twice
+     now, gating an entire column family (including early/late/drift/slope
+     and diagnostic companions) has produced a "significant" hit on a
+     byproduct column rather than the intended target metric. The spatial
+     family below is still gated broadly, preserved as-is since it's
+     already-reported round-1 history, not to be re-cherry-picked here.
+
 Usage:
     python water_density_analysis.py \
-        --hydration-csv water_analysis/water_density_feats.csv \
+        --hydration-csv water_spatial/water_density_feats.csv \
         --spatial-csv   water_spatial/water_spatial_feats.csv \
         --pocket-vol-csv pkt_vol/pocket_volume_features.csv \
         --dw-scores-csv water_analysis/dw_scores_all_sequences_40_500ns_ml.csv \
-        --seq-list      seq_ids_ngs_observed.txt \
+        --seq-list      seq_ids_orig.txt \
         --out-dir       analysis/water_density
 """
 
@@ -56,11 +71,14 @@ GROUP_A = "Binder"
 
 SIG_THRESHOLD = 0.05
 
-# Column families to gate: the two headline means plus their early/late/
-# drift/slope companions (from aggregate_hydration_feats.py /
-# extract_water_spatial_feats.py).
-HYDRATION_COLS_PREFIX = "hydration_count_"
-SPATIAL_COLS_PREFIX   = "pocket_water_density_"
+# Pre-registered headline scalars for the hydration family (see module
+# docstring) -- gated on their own, NOT the full hydration_count_* prefix.
+HYDRATION_HEADLINE_COLS = ["hydration_count_ligand_4A_mean",
+                           "hydration_count_pocket_4A_mean"]
+
+# Spatial family is still gated broadly (every column matching this prefix,
+# minus diagnostics) -- preserved as the already-reported round-1 behavior.
+SPATIAL_COLS_PREFIX = "pocket_water_density_"
 
 
 # ── Stats helpers (mirrors core_vs_tail_regions.py) ─────────────────────────
@@ -160,7 +178,10 @@ def gate_columns(prefix, df):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--hydration-csv", default="water_analysis/water_density_feats.csv")
+    parser.add_argument("--hydration-csv", default="water_spatial/water_density_feats_ligand.csv",
+                        help="aggregate_hydration_feats.py output, --reference-region ligand")
+    parser.add_argument("--hydration-pocket-csv", default="water_spatial/water_density_feats_pocket.csv",
+                        help="aggregate_hydration_feats.py output, --reference-region pocket_residues")
     parser.add_argument("--spatial-csv", default="water_spatial/water_spatial_feats.csv")
     parser.add_argument("--pocket-vol-csv", default="pkt_vol/pocket_volume_features.csv")
     parser.add_argument("--dw-scores-csv",
@@ -173,22 +194,25 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     seq_type_map = load_seq_type_map(args.seq_list)
 
-    hydration_df = load_optional(args.hydration_csv, "hydration-shell counts")
+    hydration_df        = load_optional(args.hydration_csv, "hydration-shell counts (ligand)")
+    hydration_pocket_df = load_optional(args.hydration_pocket_csv, "hydration-shell counts (pocket)")
     spatial_df   = load_optional(args.spatial_csv, "gmx-spatial pocket density")
     pocket_vol_df = load_optional(args.pocket_vol_csv, "pocket volume")
     dw_df        = load_optional(args.dw_scores_csv, "R-score D/W table")
 
-    if hydration_df is None and spatial_df is None:
+    if hydration_df is None and hydration_pocket_df is None and spatial_df is None:
         raise FileNotFoundError(
-            "Neither hydration-shell nor gmx-spatial water-density CSVs were "
-            "found. Run the water_analysis/ or water_spatial/ pipelines first.")
+            "No hydration-shell or gmx-spatial water-density CSVs were "
+            "found. Run the water_spatial/ pipelines first.")
 
     # ── Assemble one merged table, keyed on seq_id, with a Group column ─────
     base = pd.DataFrame({"seq_id": list(seq_type_map.keys())})
     base["Group"] = base["seq_id"].map(seq_type_map)
     merged = base
 
-    for df, label in [(hydration_df, "hydration"), (spatial_df, "spatial")]:
+    for df, label in [(hydration_df, "hydration_ligand"),
+                       (hydration_pocket_df, "hydration_pocket"),
+                       (spatial_df, "spatial")]:
         if df is not None:
             merged = merged.merge(df.drop(columns=["seq_type"], errors="ignore"),
                                    on="seq_id", how="left")
@@ -212,8 +236,9 @@ def main():
 
     corr_pairs = []
     candidate_cols = {
-        "hydration_count_mean":       "hydration_count_mean" in merged.columns,
-        "pocket_water_density_mean":  "pocket_water_density_mean" in merged.columns,
+        col: col in merged.columns for col in
+        HYDRATION_HEADLINE_COLS + ["pocket_water_density_accessible_frac_bulk",
+                                    "pocket_water_density_mean"]
     }
     reference_cols = {
         "pocket_vol_mean": "pocket_vol_mean" in merged.columns,
@@ -221,8 +246,14 @@ def main():
     }
 
     corr_targets = []
-    if candidate_cols["hydration_count_mean"] and candidate_cols["pocket_water_density_mean"]:
-        corr_targets.append(("hydration_count_mean", "pocket_water_density_mean"))
+    # Cross-method check: each hydration headline against each spatial
+    # candidate (planned in round 1, never done until now).
+    present_hydration = [c for c in HYDRATION_HEADLINE_COLS if candidate_cols[c]]
+    present_spatial = [c for c in ["pocket_water_density_accessible_frac_bulk",
+                                    "pocket_water_density_mean"] if candidate_cols[c]]
+    for h in present_hydration:
+        for s in present_spatial:
+            corr_targets.append((h, s))
     for cand, present in candidate_cols.items():
         if not present:
             continue
@@ -256,7 +287,7 @@ def main():
           f"(Mann-Whitney U, BH-FDR q < {args.sig_threshold})")
     print("=" * 70)
 
-    gate_cols = gate_columns(HYDRATION_COLS_PREFIX, merged) + \
+    gate_cols = [c for c in HYDRATION_HEADLINE_COLS if c in merged.columns] + \
                 gate_columns(SPATIAL_COLS_PREFIX, merged)
     gate_cols = [c for c in gate_cols if c not in
                  ("pocket_water_density_missing", "pocket_water_density_n_voxels")]
@@ -307,9 +338,10 @@ def main():
     print(f"Saved {gate_summary_path}")
 
     # ── Plots: headline metrics by group ─────────────────────────────────────
-    headline_cols = [c for c in ["hydration_count_mean", "pocket_water_density_mean",
-                                  "pocket_water_density_frac_solvent_accessible",
-                                  "pocket_water_density_accessible_frac_bulk"]
+    headline_cols = [c for c in HYDRATION_HEADLINE_COLS +
+                      ["pocket_water_density_mean",
+                       "pocket_water_density_frac_solvent_accessible",
+                       "pocket_water_density_accessible_frac_bulk"]
                       if c in merged.columns]
     if headline_cols:
         fig, axes = plt.subplots(1, len(headline_cols),
