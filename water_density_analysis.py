@@ -44,8 +44,9 @@ This script does two things, in order:
 
 Usage:
     python water_density_analysis.py \
-        --hydration-csv water_spatial/water_density_feats.csv \
-        --spatial-csv   water_spatial/water_spatial_feats.csv \
+        --hydration-csv water_spatial/water_density_feats_ligand.csv \
+        --hydration-pocket-csv water_spatial/water_density_feats_pocket.csv \
+        --spatial-csv   water_spatial/water_spatial_feats_all.csv \
         --pocket-vol-csv pkt_vol/pocket_volume_features.csv \
         --dw-scores-csv water_analysis/dw_scores_all_sequences_40_500ns_ml.csv \
         --seq-list      seq_ids_orig.txt \
@@ -182,7 +183,7 @@ def main():
                         help="aggregate_hydration_feats.py output, --reference-region ligand")
     parser.add_argument("--hydration-pocket-csv", default="water_spatial/water_density_feats_pocket.csv",
                         help="aggregate_hydration_feats.py output, --reference-region pocket_residues")
-    parser.add_argument("--spatial-csv", default="water_spatial/water_spatial_feats.csv")
+    parser.add_argument("--spatial-csv", default="water_spatial/water_spatial_feats_all.csv")
     parser.add_argument("--pocket-vol-csv", default="pkt_vol/pocket_volume_features.csv")
     parser.add_argument("--dw-scores-csv",
                         default="water_analysis/dw_scores_all_sequences_40_500ns_ml.csv")
