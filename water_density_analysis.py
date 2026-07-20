@@ -307,7 +307,9 @@ def main():
     print(f"Saved {gate_summary_path}")
 
     # ── Plots: headline metrics by group ─────────────────────────────────────
-    headline_cols = [c for c in ["hydration_count_mean", "pocket_water_density_mean"]
+    headline_cols = [c for c in ["hydration_count_mean", "pocket_water_density_mean",
+                                  "pocket_water_density_frac_solvent_accessible",
+                                  "pocket_water_density_accessible_frac_bulk"]
                       if c in merged.columns]
     if headline_cols:
         fig, axes = plt.subplots(1, len(headline_cols),
