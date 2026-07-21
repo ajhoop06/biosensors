@@ -185,15 +185,22 @@ def compute_all_rmsd(seq_id, group_label):
 
     # ── Whole-protein alignment: a SEPARATE superposition on every common Ca
     # atom (no exclusions) -- the conventional global-drift metric, not the
-    # core alignment above. traj.superpose() mutates .xyz in place, so this
-    # uses a fresh copy of traj rather than reusing traj_core (which is
-    # already aligned to the core selection, not the whole protein). ──
+    # core alignment above. mdtraj's Trajectory has no public .copy(), but
+    # re-superposing traj_core (== traj; superpose() mutates in place and
+    # returns self) is safe here regardless: Kabsch superposition always
+    # finds the globally optimal fit for whatever atom_indices are given,
+    # independent of the trajectory's current orientation, so re-running it
+    # with a different atom selection produces the same result as superposing
+    # fresh from the original coordinates. This is only correct because the
+    # four core-aligned region_rmsd arrays above were already computed (as
+    # independent numpy arrays) before this second, whole-protein-atom
+    # superposition mutates traj_core's coordinates again. ──
     whole_resids = sorted(set(ref_ca) & set(traj_ca))
     if not whole_resids:
         return None
     whole_ref_idx  = [ref_ca[r]  for r in whole_resids]
     whole_traj_idx = [traj_ca[r] for r in whole_resids]
-    traj_whole = traj.copy().superpose(ref, atom_indices=whole_traj_idx, ref_atom_indices=whole_ref_idx)
+    traj_whole = traj_core.superpose(ref, atom_indices=whole_traj_idx, ref_atom_indices=whole_ref_idx)
     region_rmsd["Whole"] = _rmsd_to_ref(traj_whole, whole_traj_idx, ref, whole_ref_idx)
 
     time_ns = traj_core.time / 1000.0  # mdtraj reports ps
