@@ -36,8 +36,17 @@ Outputs:
         binder/nonbinder discriminators found for gate/latch in this
         analysis.
 
+Runs on Alpine (not locally), since inputs are read from the PetaLibrary
+archive rather than scratch. After running, pull the resulting summary CSV
+back to a local checkout (e.g. via dtn.rc.colorado.edu) for
+rmsd_to_ref_significance.py / plot_gate_latch_rmsd_to_ref.ipynb.
+
 Usage:
-    python extract_gate_latch_rmsd_feats.py [seq_ids.txt] [--tag _500ns]
+    conda activate biosensors
+    python extract_gate_latch_rmsd_feats.py [seq_ids_orig.txt] [--tag _500ns]
+
+    # or via SLURM:
+    sbatch submit_extract_rmsd_to_ref.sh [seq_ids_orig.txt] [--tag _500ns]
 """
 
 import os
@@ -50,8 +59,12 @@ import mdtraj as md
 from scipy.stats import linregress
 
 # ── Configurable paths / window tag ───────────────────────────────────────────
-BASE     = "/Users/ivanatang/Library/CloudStorage/OneDrive-UCB-O365/Shirts Lab/LCA_boltz_models"
-REPO_DIR = "/Users/ivanatang/Developer/biosensors"
+# Trajectory inputs are read from the PetaLibrary archive, not scratch --
+# scratch auto-deletes after 90 days and older runs' xtc/gro/medoid files are
+# already gone (mirrors water_analysis/R_score_calc.py and
+# LIG_contacts/contact_type_analysis.py's PetaLibrary convention).
+BASE     = "/pl/active/shirts_archive/IvanaTang/biosensors"
+REPO_DIR = "/projects/ivta1597/biosensors"
 RUNREL = "prod_md_0p9_cutoff_3dt_64x1_16PME_642dd"
 TAG    = "_500ns"
 NM_TO_ANG = 10.0

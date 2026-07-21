@@ -21,7 +21,9 @@ split, following this repo's established significance-screening convention
      with one panel per region, plus a per-region-per-feature significance
      summary and a plain verdict table.
 
-Input (produced by extract_gate_latch_rmsd_feats.py):
+Input (produced by extract_gate_latch_rmsd_feats.py, which now runs on Alpine
+against the PetaLibrary archive -- pull its output CSV back to this local
+checkout, e.g. via dtn.rc.colorado.edu, before running this script):
     gate_latch_rmsd_to_ref_summary{TAG}.csv
 
 Usage:
