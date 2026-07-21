@@ -1,29 +1,40 @@
 """
 extract_gate_latch_rmsd_feats.py
 
-Computes gate and latch Ca RMSD-to-own-Boltz-reference (protein_<ID>.pdb),
-independently for each region, for every sequence in seq_ids.txt.
+Computes Ca RMSD-to-own-Boltz-reference (protein_<ID>.pdb), independently
+for each region, for every sequence in seq_ids.txt. Regions covered: gate
+(84-90), latch (114-118), loop Lb7a5 (148-155), the C-terminal recoil helix
+(154-166), and the whole protein.
 
 This is a different axis from the existing gate-latch pairwise distance
 (which conflates gate and latch motion into one relative coordinate) and
 from per-region RMSF (which measures spread around a trajectory's own mean
-structure, blind to where that mean sits). Here, each frame is superposed
-on a "core" Ca selection (protein Ca atoms excluding gate, latch, Lb7a5,
-and the C-terminal recoil helix) so gate/latch motion doesn't contaminate
-the alignment, then gate and latch Ca RMSD are scored separately against
-the per-sequence Boltz-predicted reference structure. This tests whether
-each region's average position drifts toward or away from its modeled
-starting pose over the trajectory.
+structure, blind to where that mean sits). Two separate superpositions are
+used here:
+  - A "core" alignment (protein Ca atoms excluding gate, latch, Lb7a5, and
+    the recoil helix) so none of those four regions' own motion can
+    contaminate the alignment used to score them. Gate/Latch/Lb7a5/Recoil
+    Ca RMSD are all scored against this one alignment.
+  - A separate whole-protein alignment (every common Ca atom, no exclusions)
+    -- the conventional global-drift metric, answering a different question
+    than the four region-specific scores above and so deliberately not
+    reusing their alignment.
+Both test whether a region's (or the whole structure's) average position
+drifts toward or away from its modeled starting pose over the trajectory.
 
 Outputs:
-    <run_dir>/gate_rmsd_to_ref.xvg    per-frame gate Ca RMSD to reference
-    <run_dir>/latch_rmsd_to_ref.xvg   per-frame latch Ca RMSD to reference
+    <run_dir>/gate_rmsd_to_ref.xvg           per-frame gate Ca RMSD to reference
+    <run_dir>/latch_rmsd_to_ref.xvg          per-frame latch Ca RMSD to reference
+    <run_dir>/lb7a5_rmsd_to_ref.xvg          per-frame Lb7a5 Ca RMSD to reference
+    <run_dir>/recoil_rmsd_to_ref.xvg         per-frame recoil helix Ca RMSD to reference
+    <run_dir>/whole_protein_rmsd_to_ref.xvg  per-frame whole-protein Ca RMSD to reference
     <REPO_DIR>/analysis/gate_latch_rmsd_to_ref_summary{TAG}.csv   per-sequence summary,
         including early/late window means (default 100 ns) and a
-        full-trajectory linear regression slope (A/ns) for both gate and
-        latch - the recommended ML features are the wide-window late mean
-        and/or the regression slope, since those were the most robust
-        binder/nonbinder discriminators found in this analysis.
+        full-trajectory linear regression slope (A/ns) for every region -
+        the recommended ML features are the wide-window late mean and/or
+        the regression slope, since those were the most robust
+        binder/nonbinder discriminators found for gate/latch in this
+        analysis.
 
 Usage:
     python extract_gate_latch_rmsd_feats.py [seq_ids.txt] [--tag _500ns]
@@ -57,6 +68,23 @@ GATE   = (84, 90)
 LATCH  = (114, 118)
 LB7A5  = (148, 155)
 RECOIL = (154, 166)
+
+# Regions scored against the core alignment (below), which excludes all of
+# these residues from the atoms used to compute that alignment.
+REGIONS = {
+    "Gate":   GATE,
+    "Latch":  LATCH,
+    "Lb7a5":  LB7A5,
+    "Recoil": RECOIL,
+}
+
+REGION_XVG = {
+    "Gate":   "gate_rmsd_to_ref.xvg",
+    "Latch":  "latch_rmsd_to_ref.xvg",
+    "Lb7a5":  "lb7a5_rmsd_to_ref.xvg",
+    "Recoil": "recoil_rmsd_to_ref.xvg",
+    "Whole":  "whole_protein_rmsd_to_ref.xvg",
+}
 
 EXCLUDED_RESIDS = set()
 for _lo, _hi in (GATE, LATCH, LB7A5, RECOIL):
@@ -102,7 +130,15 @@ def region_indices(ca_map, lo, hi):
     return [ca_map[r] for r in range(lo, hi + 1) if r in ca_map]
 
 
-def compute_region_rmsd(seq_id, group_label):
+def _rmsd_to_ref(traj_super, traj_idx, ref, ref_idx):
+    """Per-frame RMSD (Angstrom) between traj_super's atoms at traj_idx and
+    ref's atoms at ref_idx, given a trajectory already superposed onto ref
+    using whatever alignment atom set the caller chose."""
+    diff = traj_super.xyz[:, traj_idx, :] - ref.xyz[0, ref_idx, :]
+    return np.sqrt(np.mean(np.sum(diff ** 2, axis=2), axis=1)) * NM_TO_ANG
+
+
+def compute_all_rmsd(seq_id, group_label):
     ref_pdb = find_reference_pdb(seq_id, group_label)
     run_dir = seq_run_dir(seq_id, group_label)
     top_pdb = os.path.join(run_dir, "medoid_PL.pdb")
@@ -117,29 +153,38 @@ def compute_region_rmsd(seq_id, group_label):
     ref_ca  = ca_index_map(ref.topology)
     traj_ca = ca_index_map(traj.topology)
 
+    # ── Core alignment: excludes gate/latch/Lb7a5/recoil so their own
+    # motion can't contaminate the alignment used to score them ──
     core_resids = sorted((set(ref_ca) & set(traj_ca)) - EXCLUDED_RESIDS)
     if not core_resids:
         return None
     core_ref_idx  = [ref_ca[r]  for r in core_resids]
     core_traj_idx = [traj_ca[r] for r in core_resids]
+    traj_core = traj.superpose(ref, atom_indices=core_traj_idx, ref_atom_indices=core_ref_idx)
 
-    traj_sp = traj.superpose(ref, atom_indices=core_traj_idx, ref_atom_indices=core_ref_idx)
-
-    def region_rmsd(lo, hi):
+    region_rmsd = {}
+    for name, (lo, hi) in REGIONS.items():
         ref_idx  = region_indices(ref_ca, lo, hi)
         traj_idx = region_indices(traj_ca, lo, hi)
         if not ref_idx or not traj_idx:
             return None
-        diff = traj_sp.xyz[:, traj_idx, :] - ref.xyz[0, ref_idx, :]
-        return np.sqrt(np.mean(np.sum(diff ** 2, axis=2), axis=1)) * NM_TO_ANG
+        region_rmsd[name] = _rmsd_to_ref(traj_core, traj_idx, ref, ref_idx)
 
-    gate_rmsd  = region_rmsd(*GATE)
-    latch_rmsd = region_rmsd(*LATCH)
-    if gate_rmsd is None or latch_rmsd is None:
+    # ── Whole-protein alignment: a SEPARATE superposition on every common Ca
+    # atom (no exclusions) -- the conventional global-drift metric, not the
+    # core alignment above. traj.superpose() mutates .xyz in place, so this
+    # uses a fresh copy of traj rather than reusing traj_core (which is
+    # already aligned to the core selection, not the whole protein). ──
+    whole_resids = sorted(set(ref_ca) & set(traj_ca))
+    if not whole_resids:
         return None
+    whole_ref_idx  = [ref_ca[r]  for r in whole_resids]
+    whole_traj_idx = [traj_ca[r] for r in whole_resids]
+    traj_whole = traj.copy().superpose(ref, atom_indices=whole_traj_idx, ref_atom_indices=whole_ref_idx)
+    region_rmsd["Whole"] = _rmsd_to_ref(traj_whole, whole_traj_idx, ref, whole_ref_idx)
 
-    time_ns = traj_sp.time / 1000.0  # mdtraj reports ps
-    return time_ns, gate_rmsd, latch_rmsd
+    time_ns = traj_core.time / 1000.0  # mdtraj reports ps
+    return time_ns, region_rmsd
 
 
 def write_xvg(path, time_ns, values, ylabel):
@@ -187,17 +232,16 @@ def main():
         if group_label not in TYPE_SUBDIR:
             missing.append(seq_id)
             continue
-        result = compute_region_rmsd(seq_id, group_label)
+        result = compute_all_rmsd(seq_id, group_label)
         if result is None:
             missing.append(seq_id)
             continue
-        time_ns, gate_rmsd, latch_rmsd = result
+        time_ns, region_rmsd = result
 
         run_dir = seq_run_dir(seq_id, group_label)
-        write_xvg(os.path.join(run_dir, "gate_rmsd_to_ref.xvg"), time_ns, gate_rmsd,
-                  "Gate Ca RMSD to Boltz reference (A)")
-        write_xvg(os.path.join(run_dir, "latch_rmsd_to_ref.xvg"), time_ns, latch_rmsd,
-                  "Latch Ca RMSD to Boltz reference (A)")
+        for name, xvg_name in REGION_XVG.items():
+            write_xvg(os.path.join(run_dir, xvg_name), time_ns, region_rmsd[name],
+                      f"{name} Ca RMSD to Boltz reference (A)")
 
         t_end = time_ns[-1]
         early_wide_mask = time_ns <= (time_ns[0] + wide_window)
@@ -206,21 +250,21 @@ def main():
         row = {
             "Sequence": seq_id,
             "Group": group_label,
-            "Gate RMSD mean (A)":        round(float(gate_rmsd.mean()), 4),
-            "Gate RMSD SD (A)":          round(float(gate_rmsd.std(ddof=1)), 4),
-            "Latch RMSD mean (A)":       round(float(latch_rmsd.mean()), 4),
-            "Latch RMSD SD (A)":         round(float(latch_rmsd.std(ddof=1)), 4),
-            "N frames": len(gate_rmsd),
+            "N frames": len(time_ns),
         }
 
-        for region_name, region_rmsd in (("Gate", gate_rmsd), ("Latch", latch_rmsd)):
-            early_wide = float(region_rmsd[early_wide_mask].mean())
-            late_wide  = float(region_rmsd[late_wide_mask].mean())
-            slope      = float(linregress(time_ns, region_rmsd).slope)
-            row[f"{region_name} RMSD early{int(wide_window)} mean (A)"] = round(early_wide, 4)
-            row[f"{region_name} RMSD late{int(wide_window)} mean (A)"]  = round(late_wide, 4)
-            row[f"{region_name} drift{int(wide_window)} (A)"]          = round(late_wide - early_wide, 4)
-            row[f"{region_name} slope (A/ns)"]                          = round(slope, 6)
+        for name in REGION_XVG:
+            rmsd = region_rmsd[name]
+            row[f"{name} RMSD mean (A)"] = round(float(rmsd.mean()), 4)
+            row[f"{name} RMSD SD (A)"]   = round(float(rmsd.std(ddof=1)), 4)
+
+            early_wide = float(rmsd[early_wide_mask].mean())
+            late_wide  = float(rmsd[late_wide_mask].mean())
+            slope      = float(linregress(time_ns, rmsd).slope)
+            row[f"{name} RMSD early{int(wide_window)} mean (A)"] = round(early_wide, 4)
+            row[f"{name} RMSD late{int(wide_window)} mean (A)"]  = round(late_wide, 4)
+            row[f"{name} drift{int(wide_window)} (A)"]          = round(late_wide - early_wide, 4)
+            row[f"{name} slope (A/ns)"]                          = round(slope, 6)
 
         rows.append(row)
 
