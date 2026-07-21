@@ -22,11 +22,16 @@
 #   sbatch submit_extract_rmsd_to_ref.sh [seq_list] [extra extract_gate_latch_rmsd_feats.py args...]
 #
 # Examples:
-#   sbatch submit_extract_rmsd_to_ref.sh                              # defaults to ../seq_ids_orig.txt
-#   sbatch submit_extract_rmsd_to_ref.sh ../seq_ids_orig.txt --tag _500ns
+#   sbatch submit_extract_rmsd_to_ref.sh                              # defaults to seq_ids_orig.txt
+#   sbatch submit_extract_rmsd_to_ref.sh /projects/ivta1597/biosensors/seq_ids_orig.txt --tag _500ns
 #
 # --time above is a rough estimate for 194 sequences; adjust after the
 # first run if it under/over-shoots.
+#
+# NOTE: sbatch copies this script into a per-job spool directory
+# (/var/spool/slurmd/...) before running it, so ${BASH_SOURCE[0]} does NOT
+# point at this file's real location -- cd to the hardcoded repo path below
+# instead of trying to derive it from the script's own path.
 # ============================================================
 
 set -euo pipefail
@@ -37,9 +42,9 @@ module load openmpi
 module load anaconda
 conda activate biosensors
 
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd /projects/ivta1597/biosensors/rmsd_to_ref
 
-SEQ_LIST="${1:-../seq_ids_orig.txt}"
+SEQ_LIST="${1:-/projects/ivta1597/biosensors/seq_ids_orig.txt}"
 if [[ $# -gt 0 ]]; then
     shift
 fi
