@@ -1,3 +1,2 @@
 Columns cleared for ML_classification.ipynb integration (q < 0.05 vs at least one other group):
-  pocket_water_density_accessible_n_voxels
-  pocket_water_density_frac_solvent_accessible
+  hydration_count_pocket_4A_mean
