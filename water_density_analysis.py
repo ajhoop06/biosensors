@@ -50,7 +50,7 @@ Usage:
         --pocket-vol-csv pkt_vol/pocket_volume_features.csv \
         --dw-scores-csv water_analysis/dw_scores_all_sequences_40_500ns_ml.csv \
         --seq-list      seq_ids_orig.txt \
-        --out-dir       analysis/water_density
+        --out-dir       water_spatial/water_density
 """
 
 import argparse
@@ -188,7 +188,7 @@ def main():
     parser.add_argument("--dw-scores-csv",
                         default="water_analysis/dw_scores_all_sequences_40_500ns_ml.csv")
     parser.add_argument("--seq-list", default="seq_ids_ngs_observed.txt")
-    parser.add_argument("--out-dir", default="analysis/water_density")
+    parser.add_argument("--out-dir", default="water_spatial/water_density")
     parser.add_argument("--sig-threshold", type=float, default=SIG_THRESHOLD)
     args = parser.parse_args()
 
