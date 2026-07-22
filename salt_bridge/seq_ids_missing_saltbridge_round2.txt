@@ -1,5 +1,0 @@
-pair_3069_binder	Binder
-seq14_binder	Binder
-seq16_binder	Binder
-seq1_nb	False Positive
-seq2_nb	False Positive

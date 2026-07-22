@@ -1,8 +1,11 @@
 seq_id,seq_type,max_saltbridge_occupancy_pct,n_saltbridges_gt50pct,mean_top3_occupancy_pct
+seq16_binder,Binder,69.04,2,44.08
+seq14_binder,Binder,94.74,1,31.58
 seq10_binder,Binder,68.55,1,33.57
 seq17_binder,Binder,94.24,1,32.55
 seq39_binder,Binder,66.4,1,30.4
 seq42_binder,Binder,3.41,0,1.14
+pair_3069_binder,Binder,34.66,0,14.04
 pair_3070_binder,Binder,70.83,1,30.47
 pair_3074_binder,Binder,54.21,1,28.02
 pair_3092_binder,Binder,19.17,0,9.55
@@ -33,6 +36,8 @@ pair_3101_binder,Binder,57.23,1,22.86
 pair_3103_binder,Binder,84.14,1,33.54
 pair_3104_binder,Binder,60.62,1,33.87
 pair_3108_binder,Binder,60.42,1,29.97
+seq1_nb,False Positive,72.58,1,26.58
+seq2_nb,False Positive,1.57,0,0.52
 seq3_nb,False Positive,53.83,1,17.94
 seq4_nb,False Positive,80.01,1,32.09
 seq5_nb,False Positive,46.06,0,23.48
